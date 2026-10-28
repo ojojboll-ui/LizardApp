@@ -8,9 +8,12 @@ export const SECTIONS = [
   { id: 'input', label: 'Ingång' },
   { id: 'chords', label: 'Ackord' },
   { id: 'tempo', label: 'Tempo' },
-  { id: 'res', label: 'Resonator (Gecho / Rings)' },
-  { id: 'grain', label: 'Grains (Clouds)' },
-  { id: 'synth', label: 'Synth (Plaits)' },
+  { id: 'rings', label: 'Rings (Mutable Instruments)' },
+  { id: 'clouds', label: 'Clouds (Mutable Instruments)' },
+  { id: 'plaits', label: 'Plaits (Mutable Instruments)' },
+  { id: 'res', label: 'Resonator (Gecho-stil)' },
+  { id: 'grain', label: 'Ackord-grains (Lizard)' },
+  { id: 'synth', label: 'Synth (Lizard)' },
   { id: 'filter', label: 'Filter & drive' },
   { id: 'delay', label: 'Delay' },
   { id: 'reverb', label: 'Reverb' },
@@ -30,6 +33,12 @@ export const SCALES = {
   Frygisk: [0, 1, 3, 5, 7, 8, 10],
   'Harm. moll': [0, 2, 3, 5, 7, 8, 11],
 };
+
+export const PLAITS_ENGINES = [
+  'VA + filter', 'Phase distortion', '6-op FM I', '6-op FM II', '6-op FM III', 'Wave terrain', 'String machine',
+  'Chiptune', 'Virtuell analog', 'Waveshaping', 'FM', 'Granulär formant', 'Additiv', 'Wavetable', 'Ackord',
+  'Tal (speech)', 'Swarm', 'Filtrerat brus', 'Partiklar', 'Sträng', 'Modal', 'Bastrumma', 'Virvel', 'Hi-hat',
+];
 
 export const PARAMS = [
   // Input
@@ -54,15 +63,53 @@ export const PARAMS = [
   { id: 'bpm', section: 'tempo', label: 'BPM', kind: 'range', min: 40, max: 200, def: 84, step: 1 },
   { id: 'click', section: 'tempo', label: 'Klick', kind: 'bool', def: false },
 
+  // Rings
+  { id: 'rgLevel', section: 'rings', label: 'Nivå', kind: 'range', min: 0, max: 1, def: 0.6 },
+  { id: 'rgModel', section: 'rings', label: 'Modell', kind: 'select', options: ['Modal', 'Sympatiska strängar', 'Sträng (oharmonisk)', 'FM-röst', 'Sympatiska, kvantiserade', 'Sträng + reverb'], def: 0 },
+  { id: 'rgStructure', section: 'rings', label: 'Structure', kind: 'range', min: 0, max: 1, def: 0.4 },
+  { id: 'rgBright', section: 'rings', label: 'Brightness', kind: 'range', min: 0, max: 1, def: 0.55 },
+  { id: 'rgDamp', section: 'rings', label: 'Damping', kind: 'range', min: 0, max: 1, def: 0.65 },
+  { id: 'rgPos', section: 'rings', label: 'Position', kind: 'range', min: 0, max: 1, def: 0.3 },
+  { id: 'rgPluck', section: 'rings', label: 'Excitation', kind: 'select', options: ['Bara mic', 'Plock vid ackordbyte', 'Plock med arpen'], def: 0 },
+  { id: 'rgVoices', section: 'rings', label: 'Resonatorer (ackordtoner)', kind: 'range', min: 1, max: 4, def: 4, step: 1 },
+  { id: 'rgOct', section: 'rings', label: 'Oktav', kind: 'range', min: -2, max: 2, def: 0, step: 1 },
+
+  // Clouds
+  { id: 'clLevel', section: 'clouds', label: 'Nivå', kind: 'range', min: 0, max: 1, def: 0.45 },
+  { id: 'clMode', section: 'clouds', label: 'Läge', kind: 'select', options: ['Granulär', 'Stretch (WSOLA)', 'Looping delay', 'Spektral'], def: 0 },
+  { id: 'clPos', section: 'clouds', label: 'Position', kind: 'range', min: 0, max: 1, def: 0.4 },
+  { id: 'clSize', section: 'clouds', label: 'Size', kind: 'range', min: 0, max: 1, def: 0.55 },
+  { id: 'clPitch', section: 'clouds', label: 'Pitch', kind: 'range', min: -24, max: 24, def: 0, step: 1, unit: 'st' },
+  { id: 'clFollow', section: 'clouds', label: 'Pitch följer ackordets grundton', kind: 'bool', def: true },
+  { id: 'clDensity', section: 'clouds', label: 'Density', kind: 'range', min: 0, max: 1, def: 0.68 },
+  { id: 'clTexture', section: 'clouds', label: 'Texture', kind: 'range', min: 0, max: 1, def: 0.55 },
+  { id: 'clSpread', section: 'clouds', label: 'Stereo spread', kind: 'range', min: 0, max: 1, def: 0.6 },
+  { id: 'clFeedback', section: 'clouds', label: 'Feedback', kind: 'range', min: 0, max: 1, def: 0.25 },
+  { id: 'clReverb', section: 'clouds', label: 'Reverb', kind: 'range', min: 0, max: 1, def: 0.35 },
+  { id: 'clSend', section: 'clouds', label: 'Skicka synthar/resonatorer in', kind: 'range', min: 0, max: 1, def: 0.2 },
+
+  // Plaits
+  { id: 'plLevel', section: 'plaits', label: 'Nivå', kind: 'range', min: 0, max: 1, def: 0.3 },
+  { id: 'plEngine', section: 'plaits', label: 'Motor', kind: 'select', options: PLAITS_ENGINES, def: 19 },
+  { id: 'plMode', section: 'plaits', label: 'Spelsätt', kind: 'select', options: ['Arp (följer arpen)', 'Ackord-drone', 'Strum vid ackordbyte'], def: 0 },
+  { id: 'plHarm', section: 'plaits', label: 'Harmonics', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'plTimbre', section: 'plaits', label: 'Timbre', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'plMorph', section: 'plaits', label: 'Morph', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'plDecay', section: 'plaits', label: 'Decay (LPG)', kind: 'range', min: 0, max: 1, def: 0.55 },
+  { id: 'plColour', section: 'plaits', label: 'LPG-färg', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'plAux', section: 'plaits', label: 'Main ◀▶ Aux-utgång', kind: 'range', min: 0, max: 1, def: 0 },
+  { id: 'plVoices', section: 'plaits', label: 'Röster', kind: 'range', min: 1, max: 4, def: 4, step: 1 },
+  { id: 'plOct', section: 'plaits', label: 'Oktav', kind: 'range', min: -2, max: 2, def: 1, step: 1 },
+
   // Resonator
-  { id: 'resLevel', section: 'res', label: 'Nivå', kind: 'range', min: 0, max: 1, def: 0.7 },
+  { id: 'resLevel', section: 'res', label: 'Nivå', kind: 'range', min: 0, max: 1, def: 0.35 },
   { id: 'resQ', section: 'res', label: 'Resonans', kind: 'range', min: 0, max: 1, def: 0.65 },
   { id: 'resBright', section: 'res', label: 'Ljushet (övertoner)', kind: 'range', min: 0, max: 1, def: 0.5 },
   { id: 'resOct', section: 'res', label: 'Oktaver', kind: 'range', min: 1, max: 3, def: 2, step: 1 },
   { id: 'resSpread', section: 'res', label: 'Stereobredd', kind: 'range', min: 0, max: 1, def: 0.7 },
 
   // Grains
-  { id: 'grLevel', section: 'grain', label: 'Nivå', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'grLevel', section: 'grain', label: 'Nivå', kind: 'range', min: 0, max: 1, def: 0.3 },
   { id: 'grPos', section: 'grain', label: 'Position (nu ◀▶ bakåt)', kind: 'range', min: 0, max: 1, def: 0.15 },
   { id: 'grSize', section: 'grain', label: 'Kornstorlek', kind: 'range', min: 20, max: 1500, def: 220, curve: 'exp', unit: 'ms' },
   { id: 'grDensity', section: 'grain', label: 'Täthet', kind: 'range', min: 0.5, max: 60, def: 10, curve: 'exp', unit: '/s' },
@@ -73,7 +120,7 @@ export const PARAMS = [
   { id: 'grOctave', section: 'grain', label: 'Oktavhopp-chans', kind: 'range', min: 0, max: 1, def: 0.2 },
 
   // Synth
-  { id: 'synLevel', section: 'synth', label: 'Nivå', kind: 'range', min: 0, max: 1, def: 0.25 },
+  { id: 'synLevel', section: 'synth', label: 'Nivå', kind: 'range', min: 0, max: 1, def: 0 },
   { id: 'synModel', section: 'synth', label: 'Modell', kind: 'select', options: ['Strängar', 'Pad', 'FM-klockor'], def: 0 },
   { id: 'synTimbre', section: 'synth', label: 'Timbre', kind: 'range', min: 0, max: 1, def: 0.5 },
   { id: 'synMorph', section: 'synth', label: 'Morph', kind: 'range', min: 0, max: 1, def: 0.5 },
@@ -125,8 +172,9 @@ export const PARAMS = [
 export const PARAM_BY_ID = Object.fromEntries(PARAMS.map((p) => [p.id, p]));
 
 // Continuous parameters that the gyro can push around.
-export const GYRO_TARGETS = ['none', 'fltCutoff', 'grPos', 'grPitch', 'grSize', 'grDensity', 'rvbMix', 'rvbSize',
-  'dlyMix', 'dlyFb', 'resQ', 'resBright', 'drive', 'synTimbre', 'synMorph', 'noise', 'ambient'];
+export const GYRO_TARGETS = ['none', 'fltCutoff', 'clPos', 'clSize', 'clDensity', 'clTexture', 'clPitch', 'rgStructure',
+  'rgBright', 'rgDamp', 'rgPos', 'plHarm', 'plTimbre', 'plMorph', 'grPos', 'grPitch', 'grSize', 'grDensity', 'rvbMix',
+  'rvbSize', 'dlyMix', 'dlyFb', 'resQ', 'resBright', 'drive', 'synTimbre', 'synMorph', 'noise', 'ambient'];
 const targetLabel = (id) => {
   if (id === 'none') return 'Inget';
   const p = PARAM_BY_ID[id];
@@ -164,25 +212,37 @@ export function formatValue(p, v) {
   return v.toFixed(2) + unit;
 }
 
+// Built-in presets are partial: anything not listed falls back to its default.
 export const PRESETS = {
+  'Ringande rum': {
+    rgLevel: 0.75, rgModel: 0, rgStructure: 0.35, rgBright: 0.6, rgDamp: 0.7, clLevel: 0.35, plLevel: 0.2,
+    plEngine: 19, resLevel: 0.2, grLevel: 0.2, rvbMix: 0.45, ambient: 0.7,
+  },
   'Gecho-kör': {
-    resLevel: 0.85, resQ: 0.75, resBright: 0.55, resOct: 3, grLevel: 0.25, synLevel: 0.1, synModel: 1,
-    rvbMix: 0.5, rvbSize: 0.85, dlyMix: 0.2, color: 1, ambient: 0.7, noise: 0,
+    resLevel: 0.85, resQ: 0.75, resBright: 0.55, resOct: 3, rgLevel: 0.3, rgModel: 1, clLevel: 0.25, grLevel: 0.25,
+    plLevel: 0.15, plMode: 1, plEngine: 6, rvbMix: 0.5, rvbSize: 0.85, dlyMix: 0.2, color: 1, ambient: 0.7,
   },
   'Brusackord': {
-    resLevel: 0.9, resQ: 0.85, noise: 1, grLevel: 0, synLevel: 0.15, synModel: 0, rvbMix: 0.45, dlyMix: 0.3,
-    ambient: 0.2, dejavu: 0.5, color: 2,
+    noise: 1, rgLevel: 0.7, rgModel: 4, rgDamp: 0.8, resLevel: 0.6, resQ: 0.85, clLevel: 0.3, grLevel: 0, plLevel: 0,
+    rvbMix: 0.45, dlyMix: 0.3, ambient: 0.2, dejavu: 0.5, color: 2,
   },
   'Molnkorn': {
-    resLevel: 0.2, grLevel: 0.9, grSize: 400, grDensity: 18, grChord: 0.9, grJitter: 0.6, grReverse: 0.3,
-    grOctave: 0.35, synLevel: 0, rvbMix: 0.55, rvbSize: 0.9, dlyMix: 0.25,
+    clLevel: 0.9, clMode: 0, clPos: 0.6, clSize: 0.7, clDensity: 0.8, clTexture: 0.7, clReverb: 0.6, clSend: 0.4,
+    grLevel: 0.5, grChord: 0.9, grJitter: 0.6, rgLevel: 0.3, plLevel: 0, resLevel: 0.1, rvbMix: 0.4,
   },
-  'Spöksträngar': {
-    resLevel: 0.5, resQ: 0.6, grLevel: 0.3, synLevel: 0.45, synModel: 0, synDecay: 0.7, arpPattern: 2,
-    arpRate: 3, arpChance: 0.5, dlyMix: 0.35, dlyDiv: 2, rvbMix: 0.45,
+  'Spektralt': {
+    clLevel: 0.8, clMode: 3, clPos: 0.5, clSize: 0.6, clTexture: 0.6, clSend: 0.5, rgLevel: 0.4, rgModel: 1,
+    plLevel: 0.2, plMode: 1, plEngine: 12, rvbMix: 0.55, rvbSize: 0.9,
+  },
+  'Plaits-arp': {
+    plLevel: 0.6, plEngine: 10, plMode: 0, plHarm: 0.4, plTimbre: 0.55, plMorph: 0.4, plDecay: 0.5, arpRate: 3,
+    arpPattern: 2, arpChance: 0.55, rgLevel: 0.35, clLevel: 0.3, resLevel: 0.15, dlyMix: 0.35, rvbMix: 0.4,
   },
   'Klockskog': {
-    resLevel: 0.35, grLevel: 0.35, synLevel: 0.4, synModel: 2, synTimbre: 0.4, synMorph: 0.6, synDecay: 0.6,
-    arpRate: 1, arpPattern: 2, arpChance: 0.45, rvbMix: 0.6, rvbSize: 0.9, color: 2,
+    plLevel: 0.5, plEngine: 20, plMode: 0, plHarm: 0.6, plTimbre: 0.5, plMorph: 0.6, plDecay: 0.7, arpRate: 1,
+    arpChance: 0.45, rgLevel: 0.4, rgModel: 3, clLevel: 0.35, rvbMix: 0.6, rvbSize: 0.9, color: 2,
+  },
+  'Lizard klassisk': {
+    rgLevel: 0, clLevel: 0, plLevel: 0, resLevel: 0.7, grLevel: 0.5, synLevel: 0.25,
   },
 };

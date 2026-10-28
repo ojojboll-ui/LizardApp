@@ -8,9 +8,9 @@
 //                                                     v
 //                                     filter -> drive -> looper -> delay -> reverb -> limiter -> out
 //
-// The DSP is written from scratch but borrows ideas from Gechologic's Gecho
-// (filter bank on mic/noise), Mutable Instruments Rings (resonator),
-// Clouds (granular + Dattorro-style reverb) and Plaits (macro synth voices).
+// The Lizard engines (resonator bank, grains, synth) are written from scratch
+// after Gechologic's Gecho. Next to them run the real Mutable Instruments
+// Plaits, Rings and Clouds, compiled to WebAssembly (js/mi.wasm, see wasm/).
 
 const TAU = Math.PI * 2;
 const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
@@ -388,7 +388,20 @@ class LizardEngine extends AudioWorkletProcessor {
       rvbMix: 0.4, rvbSize: 0.75, rvbDamp: 0.35,
       loopBars: 2, loopFb: 0.93, loopLevel: 0.9, loopFadeAlways: false, loopSpeed: 0,
       master: 0.8, progLen: 2, chordBars: 1,
+      plLevel: 0, plEngine: 8, plHarm: 0.5, plTimbre: 0.5, plMorph: 0.5, plDecay: 0.5, plColour: 0.5, plMode: 0, plVoices: 4, plOct: 0, plAux: 0,
+      rgLevel: 0, rgModel: 0, rgStructure: 0.4, rgBright: 0.5, rgDamp: 0.6, rgPos: 0.3, rgPluck: 0, rgVoices: 4, rgOct: 0,
+      clLevel: 0, clMode: 0, clPos: 0.4, clSize: 0.5, clPitch: 0, clDensity: 0.65, clTexture: 0.5, clSpread: 0.6, clFeedback: 0.2, clReverb: 0.3, clFollow: true, clSend: 0,
     };
+
+    // Mutable Instruments engines (WebAssembly, loaded after start)
+    this.mi = null;
+    this.micBuf = new Float32Array(128); this.resInBuf = new Float32Array(128);
+    this.prevL = new Float32Array(128); this.prevR = new Float32Array(128);
+    this.rgNote = [48, 52, 55, 59]; this.plNote = [48, 52, 55, 59];
+    this.rgStrum = [false, false, false, false];
+    this.plTrig = []; this.plVoice = 0;
+    this.miOff = { plaits: 12 * Math.log2(47872.34 / sr), rings: 12 * Math.log2(48000 / sr) };
+    this.rootPcs = [0]; this.rootShift = 0;
     this.res = new ResonatorBank(sr);
     this.gran = new Granular(sr, 20);
     this.ks = Array.from({ length: 8 }, () => new KSVoice());
@@ -422,7 +435,7 @@ class LizardEngine extends AudioWorkletProcessor {
     this.t = 0;
 
     // smoothed gains
-    this.sm = { resLevel: 0, grLevel: 0, synLevel: 0, monitor: 0, loopLevel: 0.9, dlyMix: 0, rvbMix: 0, master: 0, drive: 0 };
+    this.sm = { resLevel: 0, grLevel: 0, synLevel: 0, rgLevel: 0, plLevel: 0, clLevel: 0, monitor: 0, loopLevel: 0.9, dlyMix: 0, rvbMix: 0, master: 0, drive: 0 };
     this.smK = 1 - Math.exp(-1 / (0.02 * sr));
 
     this.dcX = 0; this.dcY = 0;
@@ -441,9 +454,11 @@ class LizardEngine extends AudioWorkletProcessor {
   onMessage(m) {
     switch (m.type) {
       case 'params': Object.assign(this.p, m.values); break;
+      case 'wasm': this.loadWasm(m.bytes); break;
       case 'chords':
         this.chords = m.chords;
         this.keyRoot = m.keyRoot;
+        this.rootPcs = m.rootPcs || [m.keyRoot];
         this.chordIdx %= this.chords.length;
         this.setChord(this.chordIdx, false);
         break;
@@ -469,10 +484,41 @@ class LizardEngine extends AudioWorkletProcessor {
     }
   }
 
+  async loadWasm(bytes) {
+    try {
+      const { instance } = await WebAssembly.instantiate(bytes, {});
+      const x = instance.exports;
+      x._initialize();
+      x.lz_init(this.sr);
+      const buf = x.memory.buffer;
+      const mk = () => new Float32Array(128);
+      this.mi = {
+        x,
+        in: new Float32Array(buf, x.lz_in_ptr(), 256),
+        cin: new Float32Array(buf, x.lz_clouds_in_ptr(), 512),
+        out: new Float32Array(buf, x.lz_out_ptr(), 512),
+        rL: mk(), rR: mk(), pL: mk(), pR: mk(), cL: mk(), cR: mk(),
+      };
+      this.port.postMessage({ type: 'mi', ok: true });
+    } catch (err) {
+      this.port.postMessage({ type: 'mi', ok: false, error: String(err) });
+    }
+  }
+
   setChord(idx, notify) {
     this.chordIdx = idx;
     const c = this.chords[idx] || this.chords[0];
     this.chord = c;
+    const rootPc = this.rootPcs[idx] ?? this.keyRoot;
+    this.rootShift = ((rootPc - this.keyRoot + 18) % 12) - 6;
+    if (notify) {
+      const p = this.p;
+      if (p.rgPluck > 0) this.rgStrum.fill(true);
+      if (p.plMode === 2) {
+        const gap = Math.round(this.sr * 0.03);
+        c.forEach((nn, i) => this.pending.push({ t: this.t + i * gap, n: nn + 12 * p.plOct, vel: 1, pl: true }));
+      }
+    }
     // intervals for grains, relative to the key root, folded into -5..+16
     const ref = Math.floor((c[0] - this.keyRoot) / 12) * 12 + this.keyRoot;
     this.intervals = c.map((n) => {
@@ -555,20 +601,84 @@ class LizardEngine extends AudioWorkletProcessor {
 
   onArpStep() {
     const p = this.p;
-    if (p.synModel === 1 || p.synLevel < 0.001) return;
+    const js = p.synModel !== 1 && p.synLevel > 0.001;
+    const pl = this.mi && p.plMode === 0 && p.plLevel > 0.001;
+    const rg = this.mi && p.rgPluck === 2 && p.rgLevel > 0.001;
+    if (!js && !pl && !rg) return;
     if (Math.random() > p.arpChance) return;
-    const base = this.chord.map((n) => n + 12 * p.synOct);
+    const base = this.chord;
     const notes = base.concat(base.map((n) => n + 12));
     const vel = 0.6 + Math.random() * 0.4;
+    let note;
     switch (p.arpPattern) {
-      case 0: this.triggerNote(notes[this.arpIdx++ % notes.length], vel); break;
-      case 1: this.triggerNote(notes[notes.length - 1 - (this.arpIdx++ % notes.length)], vel); break;
-      case 2: this.triggerNote(notes[(Math.random() * notes.length) | 0], vel); break;
+      case 0: note = notes[this.arpIdx++ % notes.length]; break;
+      case 1: note = notes[notes.length - 1 - (this.arpIdx++ % notes.length)]; break;
+      case 2: note = notes[(Math.random() * notes.length) | 0]; break;
       case 3: {
         const gap = Math.round(this.sr * 0.018);
-        base.forEach((n, i) => this.pending.push({ t: this.t + i * gap, n, vel: vel * 0.8 }));
-        break;
+        base.forEach((n, i) => {
+          if (js) this.pending.push({ t: this.t + i * gap, n: n + 12 * p.synOct, vel: vel * 0.8 });
+          if (pl) this.pending.push({ t: this.t + i * gap, n: n + 12 * p.plOct, vel, pl: true });
+        });
+        if (rg) this.rgStrum.fill(true);
+        return;
       }
+    }
+    if (js) this.triggerNote(note + 12 * p.synOct, vel);
+    if (pl) this.plTrig.push(note + 12 * p.plOct);
+    if (rg) this.rgStrum[(Math.random() * 4) | 0] = true;
+  }
+
+  // Render Plaits, Rings and Clouds for this block from the prepared mic input.
+  renderMI(n, glideC) {
+    const mi = this.mi, x = mi.x, p = this.p, c = this.chord, out = mi.out;
+    const copy = (L, R) => { L.set(out.subarray(0, n)); R.set(out.subarray(256, 256 + n)); };
+    const target = (v, oct) => c[v % c.length] + 12 * oct + (v >= c.length ? 12 : 0);
+
+    if (p.rgLevel > 0.001 || this.sm.rgLevel > 1e-4) {
+      const parts = clamp(Math.round(p.rgVoices), 1, 4);
+      x.lz_rings_set(p.rgModel, p.rgStructure, p.rgBright, p.rgDamp, p.rgPos, p.rgPluck > 0 ? 1 : 0, parts);
+      for (let v = 0; v < parts; v++) {
+        this.rgNote[v] += (target(v, p.rgOct) - this.rgNote[v]) * glideC;
+        x.lz_rings_note(v, this.rgNote[v] + this.miOff.rings, this.rgStrum[v] ? 1 : 0);
+        this.rgStrum[v] = false;
+      }
+      mi.in.set(this.resInBuf.subarray(0, n));
+      x.lz_rings_render(n);
+      copy(mi.rL, mi.rR);
+    }
+
+    if (p.plLevel > 0.001 || this.sm.plLevel > 1e-4) {
+      let voices = clamp(Math.round(p.plVoices), 1, 4);
+      if (p.plEngine === 18 || p.plEngine === 20) voices = Math.min(voices, 2); // heavy engines
+      const drone = p.plMode === 1;
+      x.lz_plaits_set(p.plEngine, p.plHarm, p.plTimbre, p.plMorph, p.plDecay, p.plColour, drone ? 1 : 0, voices, p.plAux);
+      if (drone) {
+        for (let v = 0; v < voices; v++) {
+          this.plNote[v] += (target(v, p.plOct) - this.plNote[v]) * glideC;
+          x.lz_plaits_note(v, this.plNote[v] + this.miOff.plaits, 0);
+        }
+      }
+      for (const note of this.plTrig) {
+        this.plVoice = (this.plVoice + 1) % voices;
+        x.lz_plaits_note(this.plVoice, note + this.miOff.plaits, 1);
+      }
+      this.plTrig.length = 0;
+      x.lz_plaits_render(n);
+      copy(mi.pL, mi.pR);
+    } else this.plTrig.length = 0;
+
+    if (p.clLevel > 0.001 || this.sm.clLevel > 1e-4) {
+      const cin = mi.cin, mic = this.micBuf, s = p.clSend;
+      for (let i = 0; i < n; i++) {
+        cin[i] = mic[i] + s * this.prevL[i];
+        cin[256 + i] = mic[i] + s * this.prevR[i];
+      }
+      const pitch = p.clPitch + (p.clFollow ? this.rootShift : 0);
+      x.lz_clouds_set(p.clPos, p.clSize, pitch, p.clDensity, p.clTexture, p.clSpread, p.clFeedback, p.clReverb,
+        this.frozen ? 1 : 0, p.clMode, 0);
+      x.lz_clouds_render(n);
+      copy(mi.cL, mi.cR);
     }
   }
 
@@ -604,11 +714,31 @@ class LizardEngine extends AudioWorkletProcessor {
     const tmp = this.tmp, tmp2 = this.tmp2;
     const ks = this.ks, fm = this.fm;
 
+    // input: DC block, then optional slow auto-level so quiet rooms still sing
+    const micBuf = this.micBuf, resInBuf = this.resInBuf;
+    for (let i = 0; i < n; i++) {
+      const x0 = inp ? inp[i] : 0;
+      this.dcY = x0 - this.dcX + 0.995 * this.dcY; this.dcX = x0;
+      if (p.agc) {
+        this.agcEnv += (this.dcY * this.dcY - this.agcEnv) * this.agcK;
+        const want = clamp(0.08 / Math.sqrt(this.agcEnv + 1e-9), 0.5, 40);
+        this.agcGain += (want - this.agcGain) * (want < this.agcGain ? this.agcK * 4 : this.agcK * 0.5);
+      } else this.agcGain += (1 - this.agcGain) * this.agcK;
+      const mic = this.dcY * this.agcGain * p.inGain;
+      micBuf[i] = mic;
+      resInBuf[i] = mic * (1 - p.noise) + (Math.random() * 2 - 1) * p.noise * 0.35;
+    }
+    const mi = this.mi;
+    if (mi) this.renderMI(n, glideC);
+
     for (let i = 0; i < n; i++) {
       // smoothing
       sm.resLevel += (p.resLevel - sm.resLevel) * smK;
       sm.grLevel += (p.grLevel - sm.grLevel) * smK;
       sm.synLevel += (p.synLevel - sm.synLevel) * smK;
+      sm.rgLevel += (p.rgLevel - sm.rgLevel) * smK;
+      sm.plLevel += (p.plLevel - sm.plLevel) * smK;
+      sm.clLevel += (p.clLevel - sm.clLevel) * smK;
       sm.monitor += (p.monitor - sm.monitor) * smK;
       sm.loopLevel += (p.loopLevel - sm.loopLevel) * smK;
       sm.dlyMix += (p.dlyMix - sm.dlyMix) * smK;
@@ -623,23 +753,15 @@ class LizardEngine extends AudioWorkletProcessor {
       if (st !== this.arpStep) { this.arpStep = st; this.onArpStep(); }
       while (this.pending.length && this.pending[0].t <= this.t) {
         const e = this.pending.shift();
-        this.triggerNote(e.n, e.vel);
+        if (e.pl) this.plTrig.push(e.n); else this.triggerNote(e.n, e.vel);
       }
 
-      // input: DC block, then optional slow auto-level so quiet rooms still sing
-      const x0 = inp ? inp[i] : 0;
-      this.dcY = x0 - this.dcX + 0.995 * this.dcY; this.dcX = x0;
-      if (p.agc) {
-        this.agcEnv += (this.dcY * this.dcY - this.agcEnv) * this.agcK;
-        const want = clamp(0.08 / Math.sqrt(this.agcEnv + 1e-9), 0.5, 40);
-        this.agcGain += (want - this.agcGain) * (want < this.agcGain ? this.agcK * 4 : this.agcK * 0.5);
-      } else this.agcGain += (1 - this.agcGain) * this.agcK;
-      const mic = this.dcY * this.agcGain * p.inGain;
+      const mic = micBuf[i];
       this.inSq += mic * mic;
       this.gran.write(mic);
 
       // resonator
-      const resIn = mic * (1 - p.noise) + (Math.random() * 2 - 1) * p.noise * 0.35;
+      const resIn = resInBuf[i];
       let L = 0, R = 0;
       if (sm.resLevel > 1e-4) {
         this.res.tick(resIn, tmp);
@@ -666,6 +788,14 @@ class LizardEngine extends AudioWorkletProcessor {
         L += tmp[0] * sm.synLevel; R += tmp[1] * sm.synLevel;
       }
       L += mic * sm.monitor; R += mic * sm.monitor;
+
+      // Mutable Instruments
+      if (mi) {
+        L += mi.rL[i] * sm.rgLevel * 0.8 + mi.pL[i] * sm.plLevel * 0.6;
+        R += mi.rR[i] * sm.rgLevel * 0.8 + mi.pR[i] * sm.plLevel * 0.6;
+        this.prevL[i] = L; this.prevR[i] = R; // send into Clouds next block
+        L += mi.cL[i] * sm.clLevel * 3; R += mi.cR[i] * sm.clLevel * 3;
+      }
 
       // filter
       this.fl.tick(L); this.fr.tick(R);

@@ -85,6 +85,7 @@ function sendChords() {
   if (!state.node || !state.brain.prog.length) return;
   state.node.port.postMessage({
     type: 'chords', chords: state.brain.prog.map((c) => c.midis), keyRoot: state.brain.ctx.root,
+    rootPcs: state.brain.prog.map((c) => c.rootPc),
   });
   renderChords();
 }
@@ -125,11 +126,12 @@ async function start() {
     const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
     state.ctx = ctx;
     ctx.resume();
-    await ctx.audioWorklet.addModule('js/engine-worklet.js?v=1');
+    await ctx.audioWorklet.addModule('js/engine-worklet.js?v=2');
     const node = new AudioWorkletNode(ctx, 'lizard-engine', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
     state.node = node;
     node.port.onmessage = (e) => onEngine(e.data);
     node.connect(ctx.destination);
+    loadMI(node);
 
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 8192;
@@ -166,6 +168,17 @@ async function start() {
   }
 }
 
+// The Mutable Instruments engines are compiled to WebAssembly; the worklet
+// instantiates them itself. Until (or unless) they load, the Lizard engines play.
+async function loadMI(node) {
+  try {
+    const bytes = await (await fetch('js/mi.wasm?v=2')).arrayBuffer();
+    node.port.postMessage({ type: 'wasm', bytes }, [bytes]);
+  } catch (err) {
+    toast('Kunde inte ladda Mutable Instruments-motorerna');
+  }
+}
+
 let wakeLock = null;
 async function requestWakeLock() {
   try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { /* not supported */ }
@@ -186,6 +199,10 @@ function onEngine(m) {
       break;
     }
     case 'chord': onChord(m.index); break;
+    case 'mi':
+      if (m.ok) toast('Plaits, Rings och Clouds är igång');
+      else { console.warn(m.error); toast('Mutable Instruments kunde inte starta: ' + m.error); }
+      break;
     case 'meter':
       $('#inMeter').style.transform = `scaleX(${Math.min(1, Math.sqrt(m.inRms) * 2.2)})`;
       $('#outMeter').style.transform = `scaleX(${Math.min(1, m.outPeak)})`;
@@ -377,13 +394,13 @@ function rangeControl(id, opts = {}) {
   return row;
 }
 
-function selectControl(id) {
+function selectControl(id, label) {
   const p = PARAM_BY_ID[id];
   const sel = h('select', {}, ...p.options.map((o, i) => h('option', { value: i }, o)));
   const update = (v) => { sel.value = v; };
   sel.addEventListener('change', () => setParam(id, parseInt(sel.value, 10), { src: update }));
   bind(id, update);
-  return h('label', { class: 'ctl select' }, h('span', { class: 'lbl' }, p.label), sel);
+  return h('label', { class: 'ctl select' }, h('span', { class: 'lbl' }, label || p.label), sel);
 }
 
 function boolControl(id) {
@@ -404,10 +421,12 @@ function control(id) {
 
 function buildPlay() {
   const macros = $('#macros');
-  for (const [id, label] of [['resLevel', 'Resonator'], ['grLevel', 'Grains'], ['synLevel', 'Synth'], ['loopLevel', 'Loop'],
-    ['rvbMix', 'Rymd'], ['fltCutoff', 'Filter'], ['ambient', 'Slump ◀▶ Omgivning'], ['grPos', 'Grain-position']]) {
+  for (const [id, label] of [['rgLevel', 'Rings'], ['clLevel', 'Clouds'], ['plLevel', 'Plaits'], ['resLevel', 'Gecho-resonator'],
+    ['grLevel', 'Ackord-grains'], ['synLevel', 'Lizard-synth'], ['loopLevel', 'Loop'], ['rvbMix', 'Rymd'], ['fltCutoff', 'Filter'],
+    ['ambient', 'Slump ◀▶ Omgivning'], ['clPos', 'Clouds-position'], ['plTimbre', 'Plaits-timbre']]) {
     macros.append(rangeControl(id, { label, big: true }));
   }
+  macros.prepend(selectControl('rgModel', 'Rings-modell'), selectControl('clMode', 'Clouds-läge'), selectControl('plEngine', 'Plaits-motor'));
   $('#btnLoop').addEventListener('click', () => state.node?.port.postMessage({ type: 'loop', action: 'rec' }));
   $('#btnUndo').addEventListener('click', () => state.node?.port.postMessage({ type: 'loop', action: 'undo' }));
   $('#btnClear').addEventListener('click', () => state.node?.port.postMessage({ type: 'loop', action: 'clear' }));

@@ -17,9 +17,12 @@ Appen är en statisk webbsida och behöver inget byggsteg. För att köra lokalt
 |---|---|---|
 | **Lyssnaren** | Gecho | Analyserar vilka toner som hörs (kromagram) och gissar tonart. |
 | **Ackordhjärnan** | Marbles | Gör ackordföljder. *Slump ◀▶ Omgivning* blandar musikteori-slump med ackord som passar det som hörs. *Déjà vu* låser följden eller låter den mutera. |
-| **Resonatorbank** | Gecho, Rings | Mikrofonen (eller brus) går genom 16 resonanta filter som är stämda till ackordet. |
-| **Grains** | Clouds | Korn ur de senaste 20 sekunderna. Varje korn tonhöjdsförskjuts till ackordtoner, kan gå baklänges och hoppa oktaver. Det finns också frysläge. |
-| **Synth** | Plaits | Tre modeller: Karplus-Strong-strängar, detunad pad och FM-klockor. Arpeggiatorn är synkad till tempot. |
+| **Rings** ✦ | Mutable Instruments | Riktiga Rings. Fyra resonatorer, en per ackordton, som mikrofonen (eller brus) får ringa i. Alla 6 modeller finns: modal, sympatiska strängar, sträng, FM-röst, kvantiserade strängar och sträng + reverb. Den kan också plocka själv vid ackordbyte eller i takt med arpen. |
+| **Clouds** ✦ | Mutable Instruments | Riktiga Clouds med alla 4 lägen: granulär, stretch, looping delay och spektral. Pitch kan följa ackordets grundton. Synthar och resonatorer kan skickas in i Clouds. |
+| **Plaits** ✦ | Mutable Instruments | Riktiga Plaits med alla 24 motorer, upp till 4 röster. Spelsätt: arp, ackord-drone eller strum vid ackordbyte. |
+| **Gecho-resonator** | Gecho | Egenskriven: mikrofonen (eller brus) går genom 16 resonanta filter stämda till ackordet. |
+| **Ackord-grains** | Clouds | Egenskriven: korn ur de senaste 20 sekunderna, där varje korn tonhöjdsförskjuts till en ackordton. |
+| **Lizard-synth** | Plaits | Egenskriven: Karplus-Strong-strängar, pad och FM-klockor. |
 | **Effekter** | | SVF-filter (LP/BP/HP), drive, ping-pong-delay med tape-wow, Dattorro-plattreverb och limiter. |
 | **Infinite looper** | Frippertronics | Tempo-synkad. Startar på nästa takt. Overdub med *Minne* (1 = inget försvinner), ångra, halv fart och baklänges. |
 | **Gyro** | Gecho | Lutning framåt/bakåt och åt sidan styr valfria parametrar. Skaka för nya ackord. Skärmen nedåt fryser ljudet. Gyrot kan stängas av. |
@@ -35,11 +38,28 @@ js/engine-worklet.js  ljudmotorn (AudioWorklet)
 js/chords.js          lyssnare och ackordhjärna
 js/storage.js         presets, sessioner (IndexedDB), wav-export
 js/main.js            UI, gyro, kopplingar
+js/mi.wasm            Plaits + Rings + Clouds kompilerade till WebAssembly
+wasm/lizard_mi.cc     C++-brygga mellan ljudmotorn och MI-koden
+wasm/build.sh         bygger js/mi.wasm (clang + wasi-libc)
+wasm/eurorack/        MI:s källkod (MIT-licens, oförändrad)
 ```
+
+## Mutable Instruments-koden
+
+Plaits, Rings och Clouds är Emilie Gillets originalkod från [pichenettes/eurorack](https://github.com/pichenettes/eurorack) och [stmlib](https://github.com/pichenettes/stmlib). Den är MIT-licensierad. Endast DSP-delarna är medtagna, och de är oförändrade; licensen finns i `wasm/eurorack/stmlib/LICENSE`. Bryggan `wasm/lizard_mi.cc` anpassar modulernas blockstorlekar (Plaits 12, Rings 24, Clouds 32) till webbläsarens 128 samples. Clouds körs i 32 kHz med omsampling, precis som på hårdvaran.
+
+För att bygga om `js/mi.wasm` (Ubuntu 24.04):
+
+```
+sudo apt-get install clang lld wasi-libc libc++-18-dev-wasm32 libc++abi-18-dev-wasm32 libclang-rt-18-dev-wasm32
+./wasm/build.sh
+```
+
+Om det knastrar på en äldre telefon kan du sänka *Röster* i Plaits eller *Resonatorer* i Rings. Plaits motorer *Modal* och *Partiklar* är begränsade till 2 röster eftersom de kräver mest av processorn.
 
 ## Plan framåt
 
-- Kompilera Mutable Instruments riktiga C++-kod (MIT-licens) till WebAssembly: Plaits-motorerna, Rings-resonatorn och Clouds. Då ersätts eller kompletteras de egenskrivna versionerna.
+- Fler MI-moduler: Elements (modal synth), Warps (ring-/vocoder-modulering av mic × synth), Beads och Marbles slumpgenerator.
 - Fler Gecho-lägen: rytmiska filter och "magic songs".
 - XY-pad, MIDI-ut och Ableton Link.
 - Om latensen behöver bli lägre: bygg en native iOS-app (AUv3) med samma DSP-kärna.
