@@ -1,4 +1,4 @@
-import { PARAMS, PARAM_BY_ID, SECTIONS, GYRO_TARGETS, PRESETS, RES_MODES, defaults, toNorm, fromNorm, formatValue } from './params.js';
+import { PARAMS, PARAM_BY_ID, SECTIONS, GYRO_TARGETS, PRESETS, RES_MODES, WARPS_ALGOS, defaults, toNorm, fromNorm, formatValue } from './params.js';
 import { Listener, ChordBrain, NOTE_NAMES } from './chords.js';
 import { makeSong, seedFromSignal } from './song.js';
 import * as store from './storage.js';
@@ -28,6 +28,7 @@ const state = {
   sent: {}, dirty: new Set(),
   pendingLoop: null,
   xy: { x: 0, y: 0 },
+  mbY: 0.5, echoHolding: false,
   song: null, // { song, part, bar, saved }
   sampling: false, sampleLen: 0,
 };
@@ -47,7 +48,7 @@ function setParam(id, v, opts = {}) {
   if (!PARAM_BY_ID[id].local) state.dirty.add(id);
   if (CHORD_IDS.has(id) && !opts.noRegen) regenerate();
   if (id === 'gyroOn' && v) enableGyro();
-  if (['gyroA', 'gyroB', 'gyroOn', 'xyX', 'xyY'].includes(id)) markAllTargetsDirty();
+  if (['gyroA', 'gyroB', 'gyroOn', 'xyX', 'xyY', 'mbYTarget', 'arpSource'].includes(id)) markAllTargetsDirty();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => store.saveCurrent(state.params), 400);
 }
@@ -71,6 +72,7 @@ function effective(id) {
   if (P.gyroOn && GYRO_TARGETS[P.gyroB] === id) { n += P.gyroBAmt * state.gyro.b * 0.5; mod = true; }
   if (GYRO_TARGETS[P.xyX] === id) { n += P.xyXAmt * state.xy.x * 0.5; mod = true; }
   if (GYRO_TARGETS[P.xyY] === id) { n += P.xyYAmt * state.xy.y * 0.5; mod = true; }
+  if (P.arpSource === 1 && GYRO_TARGETS[P.mbYTarget] === id) { n += P.mbYAmt * (state.mbY - 0.5); mod = true; }
   return mod ? fromNorm(p, n) : v;
 }
 
@@ -135,7 +137,7 @@ async function start() {
     const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
     state.ctx = ctx;
     ctx.resume();
-    await ctx.audioWorklet.addModule('js/engine-worklet.js?v=3');
+    await ctx.audioWorklet.addModule('js/engine-worklet.js?v=4');
     const node = new AudioWorkletNode(ctx, 'lizard-engine', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
     state.node = node;
     node.port.onmessage = (e) => onEngine(e.data);
@@ -181,7 +183,7 @@ async function start() {
 // instantiates them itself. Until (or unless) they load, the Lizard engines play.
 async function loadMI(node) {
   try {
-    const bytes = await (await fetch('js/mi.wasm?v=2')).arrayBuffer();
+    const bytes = await (await fetch('js/mi.wasm?v=3')).arrayBuffer();
     node.port.postMessage({ type: 'wasm', bytes }, [bytes]);
   } catch (err) {
     toast('Kunde inte ladda Mutable Instruments-motorerna');
@@ -208,13 +210,18 @@ function onEngine(m) {
       if (b === 0) songBar();
       break;
     }
+    case 'echoState':
+      state.echoHolding = m.holding;
+      $('#btnEcho').classList.toggle('active', m.holding);
+      $('#btnEcho').querySelector('small').textContent = m.holding ? 'spelar fångat · tryck = släpp' : 'ljudet i ekorummet';
+      break;
     case 'samplerState':
       state.sampling = m.rec; state.sampleLen = m.len;
       renderSampler();
       break;
     case 'chord': onChord(m.index); break;
     case 'mi':
-      if (m.ok) toast('Plaits, Rings och Clouds är igång');
+      if (m.ok) toast('Plaits, Rings, Clouds, Warps och Marbles är igång');
       else { console.warn(m.error); toast('Mutable Instruments kunde inte starta: ' + m.error); }
       break;
     case 'meter':
@@ -222,6 +229,7 @@ function onEngine(m) {
       $('#outMeter').style.transform = `scaleX(${Math.min(1, m.outPeak)})`;
       $('#loopBar').style.transform = `scaleX(${m.loopPos})`;
       if (m.loopState !== state.loopState) { state.loopState = m.loopState; renderLoop(); }
+      if (m.mbY != null) state.mbY = m.mbY;
       break;
     case 'loopState': state.loopState = m.state; state.canUndo = m.canUndo; renderLoop(); break;
     case 'rec':
@@ -247,7 +255,7 @@ function listen() {
 function tick() {
   drawChroma();
   const P = state.params;
-  for (const sel of [P.xyX, P.xyY]) if (GYRO_TARGETS[sel] !== 'none') state.dirty.add(GYRO_TARGETS[sel]);
+  for (const sel of [P.xyX, P.xyY, P.mbYTarget]) if (GYRO_TARGETS[sel] !== 'none') state.dirty.add(GYRO_TARGETS[sel]);
   if (state.params.gyroOn) {
     for (const sel of [P.gyroA, P.gyroB]) if (GYRO_TARGETS[sel] !== 'none') state.dirty.add(GYRO_TARGETS[sel]);
     const dot = $('#gyroDot');
@@ -547,12 +555,15 @@ function control(id) {
 
 function buildPlay() {
   const macros = $('#macros');
-  for (const [id, label] of [['rgLevel', 'Rings'], ['clLevel', 'Clouds'], ['plLevel', 'Plaits'], ['resLevel', 'Gecho-resonator'],
+  for (const [id, label] of [['rgLevel', 'Rings'], ['clLevel', 'Clouds'], ['plLevel', 'Plaits'], ['wpLevel', 'Warps'],
+    ['ecLevel', 'Ekorum'], ['resLevel', 'Gecho-resonator'],
     ['grLevel', 'Ackord-grains'], ['synLevel', 'Lizard-synth'], ['loopLevel', 'Loop'], ['rvbMix', 'Rymd'], ['fltCutoff', 'Filter'],
-    ['ambient', 'Slump ◀▶ Omgivning'], ['clPos', 'Clouds-position'], ['plTimbre', 'Plaits-timbre']]) {
+    ['ambient', 'Slump ◀▶ Omgivning'], ['clPos', 'Clouds-position'], ['plTimbre', 'Plaits-timbre'],
+    ['wpTimbre', 'Warps-timbre'], ['mbDejaVu', 'Marbles déjà vu'], ['ecFb', 'Ekon: återkoppling']]) {
     macros.append(rangeControl(id, { label, big: true }));
   }
-  macros.prepend(selectControl('rgModel', 'Rings-modell'), selectControl('clMode', 'Clouds-läge'), selectControl('plEngine', 'Plaits-motor'));
+  macros.prepend(selectControl('rgModel', 'Rings-modell'), selectControl('clMode', 'Clouds-läge'), selectControl('plEngine', 'Plaits-motor'),
+    selectControl('ecMode', 'Ekorum-läge'), selectControl('mbModel', 'Marbles T-läge'));
   $('#btnLoop').addEventListener('click', () => state.node?.port.postMessage({ type: 'loop', action: 'rec' }));
   $('#btnUndo').addEventListener('click', () => state.node?.port.postMessage({ type: 'loop', action: 'undo' }));
   $('#btnClear').addEventListener('click', () => state.node?.port.postMessage({ type: 'loop', action: 'clear' }));
@@ -561,6 +572,22 @@ function buildPlay() {
   $('#btnRec').addEventListener('click', toggleRecording);
   $('#btnSample').addEventListener('click', toggleSampling);
   $('#btnSong').addEventListener('click', () => (state.song ? stopSong() : startSong(seedFromSignal(state.analyser))));
+  $('#btnEcho').addEventListener('click', () => {
+    if (!state.node) return;
+    if (!state.echoHolding && state.params.ecLevel < 0.05) setParam('ecLevel', 0.75);
+    state.node.port.postMessage({ type: 'echo', action: state.echoHolding ? 'release' : 'capture' });
+  });
+  $('#btnMarbles').addEventListener('click', () => setParam('arpSource', state.params.arpSource ? 0 : 1));
+  bind('arpSource', (v) => {
+    $('#btnMarbles').classList.toggle('active', !!v);
+    $('#btnMarbles').querySelector('small').textContent = v ? 'spelar · tryck = av' : 'slump i takt';
+  });
+  $('#btnWarps').addEventListener('click', () => {
+    if (state.params.wpLevel < 0.05) setParam('wpLevel', 0.75);
+    else setParam('wpAlgo', (state.params.wpAlgo + 1) % WARPS_ALGOS.length);
+  });
+  bind('wpAlgo', (v) => { $('#btnWarps').querySelector('small').textContent = WARPS_ALGOS[v]; });
+  bind('wpLevel', (v) => { $('#btnWarps').classList.toggle('active', v > 0.04); });
   $('#btnMode').addEventListener('click', () => setParam('resMode', (state.params.resMode + 1) % RES_MODES.length));
   bind('resMode', (v) => { $('#btnMode').querySelector('small').textContent = RES_MODES[v]; });
   buildXY();
@@ -590,6 +617,9 @@ function buildEdit() {
         h('button', { type: 'button', onclick: toggleSampling }, 'Sampla / stoppa'),
         h('button', { type: 'button', onclick: () => state.node?.port.postMessage({ type: 'sampler', action: 'clear' }) }, 'Rensa samplet')));
     }
+    if (s.id === 'marbles') body.prepend(h('p', { class: 'note' }, 'När Marbles spelar ersätter den arpen: T1 spelar Plaits och Lizard-synthen, T2 slår an Gecho-filtren och Rings (Plock med arpen), T3 spelar samplern. X-tonerna kvantiseras till ackordet; X-steps bestämmer hur strikt.'));
+    if (s.id === 'warps') body.prepend(h('p', { class: 'note' }, 'Mikrofonen modulerar bärvågen. Prova Vocoder med Plaits som ackord-drone och prata eller sjung.'));
+    if (s.id === 'echo') body.prepend(h('p', { class: 'note' }, 'Plockar in ljudet och spelar upp det i flera ekon, vart och ett med egen tid, tonhöjd, klang och rymd. FÅNGA EKO tar senaste takten och låter den gå runt i ekorummet.'));
     if (s.id === 'song') {
       body.append(
         h('p', { class: 'note' }, 'En hel låt växer fram ur ett slumptal som tas från mikrofonens brus: tempo, tonart, ljud, ackorddelar och arrangemang. Samma nummer ger alltid samma låt.'),

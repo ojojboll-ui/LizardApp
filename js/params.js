@@ -11,6 +11,9 @@ export const SECTIONS = [
   { id: 'rings', label: 'Rings (Mutable Instruments)' },
   { id: 'clouds', label: 'Clouds (Mutable Instruments)' },
   { id: 'plaits', label: 'Plaits (Mutable Instruments)' },
+  { id: 'warps', label: 'Warps (Mutable Instruments)' },
+  { id: 'marbles', label: 'Marbles (Mutable Instruments)' },
+  { id: 'echo', label: 'Ekorum (ekon & rum)' },
   { id: 'song', label: 'Magisk låt (Gecho)' },
   { id: 'res', label: 'Gecho-resonator & filterlägen' },
   { id: 'sampler', label: 'Ackord-sampler (Gecho)' },
@@ -42,6 +45,10 @@ export const PLAITS_ENGINES = [
   'Chiptune', 'Virtuell analog', 'Waveshaping', 'FM', 'Granulär formant', 'Additiv', 'Wavetable', 'Ackord',
   'Tal (speech)', 'Swarm', 'Filtrerat brus', 'Partiklar', 'Sträng', 'Modal', 'Bastrumma', 'Virvel', 'Hi-hat',
 ];
+
+export const WARPS_ALGOS = ['Crossfade', 'Wavefolder', 'Analog ringmod', 'Digital ringmod', 'XOR', 'Komparator',
+  'Vocoder', 'Vocoder (lång release)'];
+export const ECHO_MODES = ['Rytmiska ekon', 'Rum → katedral', 'Shimmer (tonhöjd)', 'Baklänges', 'Slump'];
 
 export const RES_MODES = ['Klassisk', 'Rytmisk (euklidisk)', 'Arpeggio', 'Puls'];
 
@@ -105,6 +112,42 @@ export const PARAMS = [
   { id: 'plAux', section: 'plaits', label: 'Main ◀▶ Aux-utgång', kind: 'range', min: 0, max: 1, def: 0 },
   { id: 'plVoices', section: 'plaits', label: 'Röster', kind: 'range', min: 1, max: 4, def: 4, step: 1 },
   { id: 'plOct', section: 'plaits', label: 'Oktav', kind: 'range', min: -2, max: 2, def: 1, step: 1 },
+
+  // Warps
+  { id: 'wpLevel', section: 'warps', label: 'Nivå', kind: 'range', min: 0, max: 1, def: 0 },
+  { id: 'wpAlgo', section: 'warps', label: 'Algoritm', kind: 'select', options: WARPS_ALGOS, def: 6 },
+  { id: 'wpTimbre', section: 'warps', label: 'Timbre', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'wpCarrier', section: 'warps', label: 'Bärvåg (mic är modulator)', kind: 'select', options: ['Synthar (Plaits, Lizard, sampler)', 'Osc: sinus', 'Osc: triangel', 'Osc: såg'], def: 0 },
+  { id: 'wpCarLvl', section: 'warps', label: 'Bärvåg-nivå', kind: 'range', min: 0, max: 1, def: 0.7 },
+  { id: 'wpModLvl', section: 'warps', label: 'Mic-nivå', kind: 'range', min: 0, max: 1, def: 0.7 },
+  { id: 'wpOct', section: 'warps', label: 'Osc-oktav', kind: 'range', min: -2, max: 2, def: 0, step: 1 },
+
+  // Marbles
+  { id: 'arpSource', section: 'marbles', label: 'Rytm & melodi från', kind: 'select', options: ['Lizard-arpen', 'Marbles'], def: 0 },
+  { id: 'mbModel', section: 'marbles', label: 'T-läge', kind: 'select', options: ['Bernoulli (växlande)', 'Kluster', 'Trummor', 'Bernoulli (oberoende)', 'Delare', 'Tre lägen', 'Markov'], def: 0 },
+  { id: 'mbRate', section: 'marbles', label: 'T-takt', kind: 'select', options: ['1/4-noter', 'Punkt. 1/8', '1/8-noter', '1/8-trioler', '1/16-noter', '1/16-trioler', '1/32-noter', '1/32-trioler', '1/64-noter'], def: 2 },
+  { id: 'mbBias', section: 'marbles', label: 'T-bias', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'mbJitter', section: 'marbles', label: 'Jitter', kind: 'range', min: 0, max: 1, def: 0 },
+  { id: 'mbDejaVu', section: 'marbles', label: 'Déjà vu (0.5 = låst slinga)', kind: 'range', min: 0, max: 1, def: 0.25 },
+  { id: 'mbLength', section: 'marbles', label: 'Slinglängd', kind: 'range', min: 1, max: 16, def: 8, step: 1 },
+  { id: 'mbSpread', section: 'marbles', label: 'X-spread', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'mbXBias', section: 'marbles', label: 'X-bias', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'mbSteps', section: 'marbles', label: 'X-steps (mot ackordtoner)', kind: 'range', min: 0, max: 1, def: 0.8 },
+  { id: 'mbRange', section: 'marbles', label: 'X-omfång', kind: 'select', options: ['2 oktaver', '5 oktaver'], def: 0 },
+  { id: 'mbYTarget', section: 'marbles', label: 'Y (långsam slump) styr', kind: 'select', options: [], def: 0, local: true, targets: true },
+  { id: 'mbYAmt', section: 'marbles', label: 'Y-mängd', kind: 'range', min: -1, max: 1, def: 0.5, local: true },
+
+  // Echo chamber
+  { id: 'ecLevel', section: 'echo', label: 'Nivå', kind: 'range', min: 0, max: 1, def: 0 },
+  { id: 'ecMode', section: 'echo', label: 'Läge', kind: 'select', options: ECHO_MODES, def: 0 },
+  { id: 'ecTime', section: 'echo', label: 'Grundtid', kind: 'select', options: ['1/16', '1/8', '1/8 punkt.', '1/4', '1/4 punkt.', '1/2', '1 takt'], def: 3 },
+  { id: 'ecTaps', section: 'echo', label: 'Antal ekon', kind: 'range', min: 1, max: 6, def: 4, step: 1 },
+  { id: 'ecFb', section: 'echo', label: 'Återkoppling', kind: 'range', min: 0, max: 0.95, def: 0.35 },
+  { id: 'ecSpace', section: 'echo', label: 'Rymd (eget reverb)', kind: 'range', min: 0, max: 1, def: 0.6 },
+  { id: 'ecTone', section: 'echo', label: 'Mörkare för varje eko', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'ecSpread', section: 'echo', label: 'Stereobredd', kind: 'range', min: 0, max: 1, def: 0.7 },
+  { id: 'ecSend', section: 'echo', label: 'Skicka synthar in (utöver mic)', kind: 'range', min: 0, max: 1, def: 0 },
+  { id: 'ecCapLen', section: 'echo', label: 'Fånga-längd', kind: 'select', options: ['1 slag', '2 slag', '1 takt', '2 takter'], def: 2 },
 
   // Resonator
   { id: 'resLevel', section: 'res', label: 'Nivå', kind: 'range', min: 0, max: 1, def: 0.35 },
@@ -198,7 +241,8 @@ export const PARAM_BY_ID = Object.fromEntries(PARAMS.map((p) => [p.id, p]));
 // Continuous parameters that the gyro can push around.
 export const GYRO_TARGETS = ['none', 'fltCutoff', 'clPos', 'clSize', 'clDensity', 'clTexture', 'clPitch', 'rgStructure',
   'rgBright', 'rgDamp', 'rgPos', 'plHarm', 'plTimbre', 'plMorph', 'grPos', 'grPitch', 'grSize', 'grDensity', 'rvbMix',
-  'rvbSize', 'dlyMix', 'dlyFb', 'resQ', 'resBright', 'resPulses', 'resPulseLen', 'bbRate', 'smpPitch', 'drive',
+  'rvbSize', 'dlyMix', 'dlyFb', 'wpTimbre', 'wpCarLvl', 'mbBias', 'mbSpread', 'mbSteps', 'mbDejaVu', 'mbXBias',
+  'ecFb', 'ecSpace', 'ecTone', 'resQ', 'resBright', 'resPulses', 'resPulseLen', 'bbRate', 'smpPitch', 'drive',
   'synTimbre', 'synMorph', 'noise', 'ambient'];
 const targetLabel = (id) => {
   if (id === 'none') return 'Inget';
@@ -279,6 +323,34 @@ export const PRESETS = {
   },
   'Ackord-sampler': {
     smpLevel: 0.7, smpMode: 0, rgLevel: 0.3, clLevel: 0.35, plLevel: 0, resLevel: 0.15, grLevel: 0.2, rvbMix: 0.45,
+  },
+  'Vocoder-kör': {
+    wpLevel: 0.85, wpAlgo: 6, wpTimbre: 0.5, wpCarrier: 0, plLevel: 0, plMode: 1, plEngine: 6, plVoices: 4,
+    rgLevel: 0.2, clLevel: 0.25, resLevel: 0, grLevel: 0, rvbMix: 0.45, color: 1,
+  },
+  'Ringmod-rum': {
+    wpLevel: 0.7, wpAlgo: 2, wpTimbre: 0.6, wpCarrier: 1, wpOct: 1, rgLevel: 0.35, clLevel: 0.35, plLevel: 0,
+    resLevel: 0.1, grLevel: 0, ecLevel: 0.4, ecMode: 0, rvbMix: 0.4,
+  },
+  'Marbles-melodier': {
+    arpSource: 1, mbModel: 0, mbRate: 2, mbDejaVu: 0.35, mbSteps: 0.85, plLevel: 0.55, plEngine: 10, plMode: 0,
+    plDecay: 0.5, rgLevel: 0.45, rgPluck: 2, clLevel: 0.3, resLevel: 0.15, resMode: 1, dlyMix: 0.3, rvbMix: 0.4,
+  },
+  'Marbles-trummor': {
+    arpSource: 1, mbModel: 2, mbRate: 4, mbDejaVu: 0.5, plLevel: 0.5, plEngine: 21, plMode: 0, rgLevel: 0.3,
+    rgPluck: 2, resLevel: 0.5, resMode: 1, noise: 0.4, clLevel: 0.2, dlyMix: 0.2, rvbMix: 0.3,
+  },
+  'Ekorum': {
+    ecLevel: 0.8, ecMode: 1, ecTime: 3, ecTaps: 5, ecFb: 0.3, ecSpace: 0.8, rgLevel: 0.3, clLevel: 0.2, plLevel: 0,
+    resLevel: 0.1, grLevel: 0, rvbMix: 0.2,
+  },
+  'Shimmer-ekon': {
+    ecLevel: 0.75, ecMode: 2, ecTime: 4, ecTaps: 4, ecFb: 0.45, ecSpace: 0.85, rgLevel: 0.35, clLevel: 0.25,
+    plLevel: 0, resLevel: 0.1, rvbMix: 0.3,
+  },
+  'Baklänges-ekon': {
+    ecLevel: 0.8, ecMode: 3, ecTime: 5, ecTaps: 3, ecFb: 0.3, ecSpace: 0.6, rgLevel: 0.3, clLevel: 0.2, plLevel: 0,
+    resLevel: 0.1, rvbMix: 0.3,
   },
   'Lizard klassisk': {
     rgLevel: 0, clLevel: 0, plLevel: 0, resLevel: 0.7, grLevel: 0.5, synLevel: 0.25,

@@ -12,7 +12,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <title>Lizard Loopsynth</title>
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
   <header class="top">
@@ -45,6 +45,9 @@
         <button id="btnSample" class="pad small" type="button"><b>SAMPLA</b><small>ljud → ackord</small></button>
         <button id="btnSong" class="pad small" type="button"><b>MAGISK LÅT</b><small>ur slumpen</small></button>
         <button id="btnMode" class="pad small" type="button"><b>GECHO-LÄGE</b><small>Klassisk</small></button>
+        <button id="btnEcho" class="pad small" type="button"><b>FÅNGA EKO</b><small>ljudet i ekorummet</small></button>
+        <button id="btnMarbles" class="pad small" type="button"><b>MARBLES</b><small>slump i takt</small></button>
+        <button id="btnWarps" class="pad small" type="button"><b>WARPS</b><small>Vocoder</small></button>
       </div>
       <div class="loopprog"><i id="loopBar"></i></div>
 
@@ -61,7 +64,7 @@
 
     <section id="edit" class="view" hidden>
       <div id="sections"></div>
-      <p class="foot">Inspirerad av Gechologic Gecho och Mutable Instruments (Plaits, Rings, Clouds, Marbles). Använd hörlurar för att undvika rundgång.</p>
+      <p class="foot">Inspirerad av Gechologic Gecho och Mutable Instruments (Plaits, Rings, Clouds, Warps, Marbles). Använd hörlurar för att undvika rundgång.</p>
     </section>
   </main>
 
@@ -89,6 +92,6 @@
   <div id="resume" class="overlay" hidden><div class="card"><button type="button">Tryck för att fortsätta</button></div></div>
   <div id="toast" class="toast"></div>
 
-  <script type="module" src="js/main.js?v=3"></script>
+  <script type="module" src="js/main.js?v=4"></script>
 </body>
 </html>
