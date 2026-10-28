@@ -193,3 +193,4 @@ input[type=range]::-moz-range-thumb { width: 24px; height: 24px; border-radius: 
 .xypad span { position: absolute; left: 10px; bottom: 8px; right: 10px; font-size: 11px; color: var(--muted); pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .note { color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
 .songinfo[hidden] { display: none; }
+.pad { -webkit-touch-callout: none; }

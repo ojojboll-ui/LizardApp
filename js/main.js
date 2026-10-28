@@ -563,7 +563,7 @@ function buildPlay() {
     macros.append(rangeControl(id, { label, big: true }));
   }
   macros.prepend(selectControl('rgModel', 'Rings-modell'), selectControl('clMode', 'Clouds-läge'), selectControl('plEngine', 'Plaits-motor'),
-    selectControl('ecMode', 'Ekorum-läge'), selectControl('mbModel', 'Marbles T-läge'));
+    selectControl('wpAlgo', 'Warps-algoritm'), selectControl('ecMode', 'Ekorum-läge'), selectControl('mbModel', 'Marbles T-läge'));
   $('#btnLoop').addEventListener('click', () => state.node?.port.postMessage({ type: 'loop', action: 'rec' }));
   $('#btnUndo').addEventListener('click', () => state.node?.port.postMessage({ type: 'loop', action: 'undo' }));
   $('#btnClear').addEventListener('click', () => state.node?.port.postMessage({ type: 'loop', action: 'clear' }));
@@ -582,12 +582,31 @@ function buildPlay() {
     $('#btnMarbles').classList.toggle('active', !!v);
     $('#btnMarbles').querySelector('small').textContent = v ? 'spelar · tryck = av' : 'slump i takt';
   });
-  $('#btnWarps').addEventListener('click', () => {
-    if (state.params.wpLevel < 0.05) setParam('wpLevel', 0.75);
-    else setParam('wpAlgo', (state.params.wpAlgo + 1) % WARPS_ALGOS.length);
+  // Warps: tap = on/off, hold = next algorithm
+  const warps = $('#btnWarps');
+  let holdTimer = 0, held = false;
+  warps.addEventListener('pointerdown', () => {
+    held = false;
+    holdTimer = setTimeout(() => {
+      held = true;
+      setParam('wpAlgo', (state.params.wpAlgo + 1) % WARPS_ALGOS.length);
+      if (state.params.wpLevel < 0.05) setParam('wpLevel', 0.75);
+      flash('#btnWarps');
+    }, 450);
   });
-  bind('wpAlgo', (v) => { $('#btnWarps').querySelector('small').textContent = WARPS_ALGOS[v]; });
-  bind('wpLevel', (v) => { $('#btnWarps').classList.toggle('active', v > 0.04); });
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) warps.addEventListener(ev, () => clearTimeout(holdTimer));
+  warps.addEventListener('contextmenu', (e) => e.preventDefault());
+  warps.addEventListener('click', () => {
+    if (held) return;
+    setParam('wpLevel', state.params.wpLevel > 0.04 ? 0 : 0.75);
+  });
+  const warpsLabel = () => {
+    const on = state.params.wpLevel > 0.04;
+    warps.classList.toggle('active', on);
+    warps.querySelector('small').textContent = `${on ? WARPS_ALGOS[state.params.wpAlgo] : 'av'} · håll = byt`;
+  };
+  bind('wpAlgo', warpsLabel);
+  bind('wpLevel', warpsLabel);
   const toggleLevel = (id, on = 0.75) => setParam(id, state.params[id] > 0.04 ? 0 : on);
   $('#btnElements').addEventListener('click', () => toggleLevel('elLevel'));
   $('#btnBeads').addEventListener('click', () => toggleLevel('bdLevel', 0.8));
