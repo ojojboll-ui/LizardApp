@@ -129,7 +129,7 @@ export function chordName(rootPc, offsets) {
 }
 
 export class ChordBrain {
-  constructor() { this.prog = []; this.ctx = null; }
+  constructor() { this.prog = []; this.ctx = null; this.rand = Math.random; }
 
   context(p, listener) {
     const det = listener ? listener.key : { root: 0, minor: false };
@@ -143,7 +143,7 @@ export class ChordBrain {
 
   offsets(deg, ctx, color) {
     let stack = STACKS[color];
-    if (!stack) stack = Math.random() < 0.6 ? [0, 3, 4] : [0, 1, 4];
+    if (!stack) stack = this.rand() < 0.6 ? [0, 3, 4] : [0, 1, 4];
     const base = degreeOffset(ctx.scale, deg);
     return stack.map((s) => degreeOffset(ctx.scale, deg + s) - base);
   }
@@ -172,7 +172,7 @@ export class ChordBrain {
       if (d === prev || d === next) x *= 0.1;
       w.push(x); sum += x;
     }
-    let r = Math.random() * sum;
+    let r = this.rand() * sum;
     for (let d = 0; d < 7; d++) { r -= w[d]; if (r <= 0) return d; }
     return 0;
   }
@@ -221,7 +221,7 @@ export class ChordBrain {
   // Marbles-style déjà vu: the chord that just finished is rewritten with
   // probability (1 - dejavu), so the progression slowly mutates.
   mutate(index, p, listener) {
-    if (!this.prog.length || Math.random() < p.dejavu) return false;
+    if (!this.prog.length || this.rand() < p.dejavu) return false;
     this.ctx = this.context(p, listener);
     const n = this.prog.length;
     const prev = this.prog[(index - 1 + n) % n];

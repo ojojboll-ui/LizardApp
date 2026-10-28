@@ -1,5 +1,6 @@
-import { PARAMS, PARAM_BY_ID, SECTIONS, GYRO_TARGETS, PRESETS, defaults, toNorm, fromNorm, formatValue } from './params.js';
+import { PARAMS, PARAM_BY_ID, SECTIONS, GYRO_TARGETS, PRESETS, RES_MODES, defaults, toNorm, fromNorm, formatValue } from './params.js';
 import { Listener, ChordBrain, NOTE_NAMES } from './chords.js';
+import { makeSong, seedFromSignal } from './song.js';
 import * as store from './storage.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -26,6 +27,9 @@ const state = {
   gyro: { a: 0, b: 0, beta0: null, gamma0: null, beta: 0, gamma: 0, lastShake: 0 },
   sent: {}, dirty: new Set(),
   pendingLoop: null,
+  xy: { x: 0, y: 0 },
+  song: null, // { song, part, bar, saved }
+  sampling: false, sampleLen: 0,
 };
 
 const ENGINE_IDS = PARAMS.filter((p) => !p.local).map((p) => p.id);
@@ -43,7 +47,7 @@ function setParam(id, v, opts = {}) {
   if (!PARAM_BY_ID[id].local) state.dirty.add(id);
   if (CHORD_IDS.has(id) && !opts.noRegen) regenerate();
   if (id === 'gyroOn' && v) enableGyro();
-  if (id === 'gyroA' || id === 'gyroB' || id === 'gyroOn') markAllTargetsDirty();
+  if (['gyroA', 'gyroB', 'gyroOn', 'xyX', 'xyY'].includes(id)) markAllTargetsDirty();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => store.saveCurrent(state.params), 400);
 }
@@ -55,15 +59,18 @@ function applyParams(obj) {
 
 function markAllTargetsDirty() { for (const t of GYRO_TARGETS) if (t !== 'none') state.dirty.add(t); }
 
-// Effective value = base value pushed around by gyro tilt (in normalised space)
+// Effective value = base value pushed around by gyro tilt and the sensor pad
+// (in normalised space)
 function effective(id) {
   const p = PARAM_BY_ID[id];
   let v = state.params[id];
   const P = state.params;
-  if (!P.gyroOn || p.kind !== 'range') return v;
+  if (p.kind !== 'range') return v;
   let n = toNorm(p, v), mod = false;
-  if (GYRO_TARGETS[P.gyroA] === id) { n += P.gyroAAmt * state.gyro.a * 0.5; mod = true; }
-  if (GYRO_TARGETS[P.gyroB] === id) { n += P.gyroBAmt * state.gyro.b * 0.5; mod = true; }
+  if (P.gyroOn && GYRO_TARGETS[P.gyroA] === id) { n += P.gyroAAmt * state.gyro.a * 0.5; mod = true; }
+  if (P.gyroOn && GYRO_TARGETS[P.gyroB] === id) { n += P.gyroBAmt * state.gyro.b * 0.5; mod = true; }
+  if (GYRO_TARGETS[P.xyX] === id) { n += P.xyXAmt * state.xy.x * 0.5; mod = true; }
+  if (GYRO_TARGETS[P.xyY] === id) { n += P.xyYAmt * state.xy.y * 0.5; mod = true; }
   return mod ? fromNorm(p, n) : v;
 }
 
@@ -81,16 +88,18 @@ function flushParams() {
 }
 
 // ───────────────────────── chords ─────────────────────────
-function sendChords() {
+function sendChords(reset = false) {
   if (!state.node || !state.brain.prog.length) return;
   state.node.port.postMessage({
     type: 'chords', chords: state.brain.prog.map((c) => c.midis), keyRoot: state.brain.ctx.root,
-    rootPcs: state.brain.prog.map((c) => c.rootPc),
+    rootPcs: state.brain.prog.map((c) => c.rootPc), reset,
   });
+  if (reset) state.chordIdx = 0;
   renderChords();
 }
 
 function regenerate() {
+  if (state.song) return; // the magic song owns the chords while it plays
   state.brain.generate(state.params, state.listener, PROG_LEN[state.params.progLen] || 4);
   sendChords();
 }
@@ -99,7 +108,7 @@ function onChord(index) {
   state.chordIdx = index;
   const n = state.brain.prog.length;
   // rewrite the chord that just finished (it plays again next cycle)
-  if (state.brain.mutate((index - 1 + n) % n, state.params, state.listener)) sendChords();
+  if (!state.song && state.brain.mutate((index - 1 + n) % n, state.params, state.listener)) sendChords();
   else renderChords();
 }
 
@@ -126,7 +135,7 @@ async function start() {
     const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
     state.ctx = ctx;
     ctx.resume();
-    await ctx.audioWorklet.addModule('js/engine-worklet.js?v=2');
+    await ctx.audioWorklet.addModule('js/engine-worklet.js?v=3');
     const node = new AudioWorkletNode(ctx, 'lizard-engine', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
     state.node = node;
     node.port.onmessage = (e) => onEngine(e.data);
@@ -196,8 +205,13 @@ function onEngine(m) {
     case 'beat': {
       const b = m.beat % 4;
       document.querySelectorAll('.beat').forEach((el, i) => el.classList.toggle('on', i === b));
+      if (b === 0) songBar();
       break;
     }
+    case 'samplerState':
+      state.sampling = m.rec; state.sampleLen = m.len;
+      renderSampler();
+      break;
     case 'chord': onChord(m.index); break;
     case 'mi':
       if (m.ok) toast('Plaits, Rings och Clouds är igång');
@@ -232,8 +246,9 @@ function listen() {
 
 function tick() {
   drawChroma();
+  const P = state.params;
+  for (const sel of [P.xyX, P.xyY]) if (GYRO_TARGETS[sel] !== 'none') state.dirty.add(GYRO_TARGETS[sel]);
   if (state.params.gyroOn) {
-    const P = state.params;
     for (const sel of [P.gyroA, P.gyroB]) if (GYRO_TARGETS[sel] !== 'none') state.dirty.add(GYRO_TARGETS[sel]);
     const dot = $('#gyroDot');
     dot.style.transform = `translate(${state.gyro.b * 22}px, ${state.gyro.a * 22}px)`;
@@ -378,6 +393,117 @@ function requestLoop() {
   });
 }
 
+// ───────────────────────── Gecho: magic songs ─────────────────────────
+function startSong(seed) {
+  if (!state.node) return;
+  if (state.song) stopSong(false);
+  const song = makeSong(seed, state.brain);
+  state.song = { song, part: -1, bar: 0, saved: { ...state.params } };
+  for (const [k, v] of Object.entries(song.global)) setParam(k, v, { noRegen: true });
+  renderSong(); // the first part starts on the next downbeat (songBar)
+  toast(song.title);
+}
+
+function stopSong(restore = true) {
+  if (!state.song) return;
+  const saved = state.song.saved;
+  state.song = null;
+  if (restore) applyParams(saved);
+  renderSong();
+}
+
+function enterPart(i) {
+  const S = state.song;
+  S.part = i % S.song.parts.length;
+  S.bar = 0;
+  const part = S.song.parts[S.part];
+  for (const [k, v] of Object.entries(part.params)) setParam(k, v, { noRegen: true });
+  state.brain.prog = part.prog.map((c) => ({ ...c, midis: [...c.midis] }));
+  state.brain.ctx = S.song.ctx;
+  sendChords(true);
+  renderSong();
+}
+
+// called on every downbeat
+function songBar() {
+  const S = state.song;
+  if (!S) return;
+  if (S.part < 0) { enterPart(0); return; }
+  S.bar++;
+  if (S.bar >= S.song.parts[S.part].bars) enterPart(S.part + 1);
+  else renderSong();
+}
+
+function renderSong() {
+  const el = $('#songInfo');
+  const btn = $('#btnSong');
+  const S = state.song;
+  el.hidden = !S;
+  btn.classList.toggle('active', !!S);
+  btn.querySelector('small').textContent = S ? 'tryck = stoppa' : 'ur slumpen';
+  if (!S) return;
+  if (S.part < 0) { el.replaceChildren(h('b', {}, S.song.title), h('span', {}, 'startar på nästa takt…')); return; }
+  const part = S.song.parts[S.part];
+  el.replaceChildren(
+    h('b', {}, S.song.title),
+    h('span', {}, `${part.name} · takt ${Math.min(S.bar + 1, part.bars)}/${part.bars} · del ${S.part + 1}/${S.song.parts.length}`),
+  );
+}
+
+// ───────────────────────── Gecho: chord sampler ─────────────────────────
+function toggleSampling() {
+  if (!state.node) return;
+  if (!state.sampling) {
+    state.node.port.postMessage({ type: 'sampler', action: 'rec' });
+    state.sampling = true;
+  } else {
+    // the sample's pitch = strongest pitch class the listener hears
+    const ch = state.listener ? state.listener.chroma : [1];
+    const root = ch.indexOf(Math.max(...ch));
+    state.node.port.postMessage({ type: 'sampler', action: 'stop', root });
+    if (state.params.smpLevel < 0.05) setParam('smpLevel', 0.7);
+  }
+  renderSampler();
+}
+
+function renderSampler() {
+  const b = $('#btnSample');
+  b.classList.toggle('rec', state.sampling);
+  b.classList.toggle('active', state.sampling);
+  b.querySelector('b').textContent = state.sampling ? 'STOPP' : 'SAMPLA';
+  b.querySelector('small').textContent = state.sampling ? 'spelar in (max 6 s)'
+    : state.sampleLen ? `${state.sampleLen.toFixed(1)} s i ackordet` : 'ljud → ackord';
+}
+
+// ───────────────────────── sensor pad ─────────────────────────
+function buildXY() {
+  const pad = $('#xyPad'), dot = $('#xyDot');
+  const show = () => {
+    dot.style.left = `${(state.xy.x + 1) * 50}%`;
+    dot.style.top = `${(1 - state.xy.y) * 50}%`;
+  };
+  const move = (e) => {
+    const r = pad.getBoundingClientRect();
+    state.xy.x = Math.max(-1, Math.min(1, ((e.clientX - r.left) / r.width) * 2 - 1));
+    state.xy.y = Math.max(-1, Math.min(1, 1 - ((e.clientY - r.top) / r.height) * 2));
+    show();
+  };
+  pad.addEventListener('pointerdown', (e) => { pad.setPointerCapture(e.pointerId); pad.classList.add('touch'); move(e); });
+  pad.addEventListener('pointermove', (e) => { if (pad.hasPointerCapture(e.pointerId)) move(e); });
+  const up = () => {
+    pad.classList.remove('touch');
+    if (!state.params.xyHold) { state.xy.x = 0; state.xy.y = 0; show(); }
+  };
+  pad.addEventListener('pointerup', up);
+  pad.addEventListener('pointercancel', up);
+  const label = () => {
+    const name = (sel) => (GYRO_TARGETS[sel] === 'none' ? '–' : PARAM_BY_ID.xyX.options[sel]);
+    $('#xyLabel').textContent = `↔ ${name(state.params.xyX)}   ↕ ${name(state.params.xyY)}`;
+  };
+  bind('xyX', label); bind('xyY', label);
+  show();
+}
+
 // ───────────────────────── UI building ─────────────────────────
 function rangeControl(id, opts = {}) {
   const p = PARAM_BY_ID[id];
@@ -433,6 +559,12 @@ function buildPlay() {
   $('#btnFreeze').addEventListener('click', () => { state.manualFreeze = !state.manualFreeze; sendFreeze(); });
   $('#btnNew').addEventListener('click', () => { regenerate(); flash('#btnNew'); });
   $('#btnRec').addEventListener('click', toggleRecording);
+  $('#btnSample').addEventListener('click', toggleSampling);
+  $('#btnSong').addEventListener('click', () => (state.song ? stopSong() : startSong(seedFromSignal(state.analyser))));
+  $('#btnMode').addEventListener('click', () => setParam('resMode', (state.params.resMode + 1) % RES_MODES.length));
+  bind('resMode', (v) => { $('#btnMode').querySelector('small').textContent = RES_MODES[v]; });
+  buildXY();
+  renderSampler();
   $('#btnGyro').addEventListener('click', () => setParam('gyroOn', !state.params.gyroOn));
   $('#btnCal').addEventListener('click', calibrate);
   bind('gyroOn', (v) => {
@@ -452,6 +584,26 @@ function buildEdit() {
     const body = h('div', { class: 'body' }, ...ids.map(control));
     if (s.id === 'gyro') body.append(h('button', { class: 'wide', type: 'button', onclick: calibrate }, 'Nollställ gyrot (nuvarande läge = mitten)'));
     if (s.id === 'tempo') body.append(tapTempo());
+    if (s.id === 'sampler') {
+      body.prepend(h('p', { class: 'note' }, 'Sampla ett ljud (knappen SAMPLA i spelläget). Det spelas sedan i ackordets toner, och Tonhöjd kan böjas i realtid med gyro eller sensorplattan.'));
+      body.append(h('div', { class: 'btnrow' },
+        h('button', { type: 'button', onclick: toggleSampling }, 'Sampla / stoppa'),
+        h('button', { type: 'button', onclick: () => state.node?.port.postMessage({ type: 'sampler', action: 'clear' }) }, 'Rensa samplet')));
+    }
+    if (s.id === 'song') {
+      body.append(
+        h('p', { class: 'note' }, 'En hel låt växer fram ur ett slumptal som tas från mikrofonens brus: tempo, tonart, ljud, ackorddelar och arrangemang. Samma nummer ger alltid samma låt.'),
+        h('div', { class: 'btnrow' },
+          h('button', { type: 'button', onclick: () => startSong(seedFromSignal(state.analyser)) }, 'Ny magisk låt'),
+          h('button', {
+            type: 'button', onclick: () => {
+              const v = prompt('Låtnummer (0–999999):', state.song ? state.song.song.seed : '');
+              if (v != null && /^\d{1,6}$/.test(v.trim())) startSong(parseInt(v, 10));
+            },
+          }, 'Spela nummer…'),
+          h('button', { type: 'button', onclick: () => stopSong() }, 'Stoppa')),
+      );
+    }
     root.append(h('details', { class: 'section' }, h('summary', {}, s.label), body));
   }
 }

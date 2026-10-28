@@ -11,7 +11,9 @@ export const SECTIONS = [
   { id: 'rings', label: 'Rings (Mutable Instruments)' },
   { id: 'clouds', label: 'Clouds (Mutable Instruments)' },
   { id: 'plaits', label: 'Plaits (Mutable Instruments)' },
-  { id: 'res', label: 'Resonator (Gecho-stil)' },
+  { id: 'song', label: 'Magisk låt (Gecho)' },
+  { id: 'res', label: 'Gecho-resonator & filterlägen' },
+  { id: 'sampler', label: 'Ackord-sampler (Gecho)' },
   { id: 'grain', label: 'Ackord-grains (Lizard)' },
   { id: 'synth', label: 'Synth (Lizard)' },
   { id: 'filter', label: 'Filter & drive' },
@@ -20,6 +22,7 @@ export const SECTIONS = [
   { id: 'looper', label: 'Looper' },
   { id: 'master', label: 'Master' },
   { id: 'gyro', label: 'Gyro' },
+  { id: 'xy', label: 'Sensorplatta' },
 ];
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -39,6 +42,8 @@ export const PLAITS_ENGINES = [
   'Chiptune', 'Virtuell analog', 'Waveshaping', 'FM', 'Granulär formant', 'Additiv', 'Wavetable', 'Ackord',
   'Tal (speech)', 'Swarm', 'Filtrerat brus', 'Partiklar', 'Sträng', 'Modal', 'Bastrumma', 'Virvel', 'Hi-hat',
 ];
+
+export const RES_MODES = ['Klassisk', 'Rytmisk (euklidisk)', 'Arpeggio', 'Puls'];
 
 export const PARAMS = [
   // Input
@@ -107,6 +112,18 @@ export const PARAMS = [
   { id: 'resBright', section: 'res', label: 'Ljushet (övertoner)', kind: 'range', min: 0, max: 1, def: 0.5 },
   { id: 'resOct', section: 'res', label: 'Oktaver', kind: 'range', min: 1, max: 3, def: 2, step: 1 },
   { id: 'resSpread', section: 'res', label: 'Stereobredd', kind: 'range', min: 0, max: 1, def: 0.7 },
+  { id: 'resMode', section: 'res', label: 'Filterläge', kind: 'select', options: RES_MODES, def: 0 },
+  { id: 'resPulses', section: 'res', label: 'Puls-täthet', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'resPulseLen', section: 'res', label: 'Puls-längd', kind: 'range', min: 5, max: 600, def: 120, curve: 'exp', unit: 'ms' },
+  { id: 'bbLevel', section: 'res', label: 'Bytebeat in i filtren', kind: 'range', min: 0, max: 1, def: 0 },
+  { id: 'bbFormula', section: 'res', label: 'Bytebeat-formel', kind: 'select', options: ['t*(42&t>>10)', 't*((t>>12|t>>8)&63&t>>4)', '(t*5&t>>7)|(t*3&t>>10)', 't*(t>>5|t>>8)>>(t>>16)', '(t>>6|t|t>>(t>>16))*10', 't*((t>>9|t>>13)&25&t>>6)'], def: 0 },
+  { id: 'bbRate', section: 'res', label: 'Bytebeat-hastighet', kind: 'range', min: 2000, max: 22000, def: 8000, curve: 'exp', unit: 'Hz' },
+
+  // Sampler
+  { id: 'smpLevel', section: 'sampler', label: 'Nivå', kind: 'range', min: 0, max: 1, def: 0 },
+  { id: 'smpMode', section: 'sampler', label: 'Spelsätt', kind: 'select', options: ['Drone i ackordet', 'Följ arpen', 'Vid ackordbyte'], def: 0 },
+  { id: 'smpPitch', section: 'sampler', label: 'Tonhöjd', kind: 'range', min: -12, max: 12, def: 0, unit: 'st' },
+  { id: 'smpOct', section: 'sampler', label: 'Oktav', kind: 'range', min: -2, max: 2, def: 0, step: 1 },
 
   // Grains
   { id: 'grLevel', section: 'grain', label: 'Nivå', kind: 'range', min: 0, max: 1, def: 0.3 },
@@ -167,6 +184,13 @@ export const PARAMS = [
   { id: 'gyroRange', section: 'gyro', label: 'Lutningsomfång', kind: 'range', min: 10, max: 90, def: 40, unit: '°', local: true },
   { id: 'shakeNew', section: 'gyro', label: 'Skaka = ny ackordföljd', kind: 'bool', def: true, local: true },
   { id: 'faceFreeze', section: 'gyro', label: 'Skärmen nedåt = frys', kind: 'bool', def: true, local: true },
+
+  // XY sensor pad (like Gecho's IR sensors, but with a finger)
+  { id: 'xyX', section: 'xy', label: 'Sidled styr', kind: 'select', options: [], def: 0, local: true, targets: true },
+  { id: 'xyXAmt', section: 'xy', label: 'Mängd sidled', kind: 'range', min: -1, max: 1, def: 0.8, local: true },
+  { id: 'xyY', section: 'xy', label: 'Höjdled styr', kind: 'select', options: [], def: 0, local: true, targets: true },
+  { id: 'xyYAmt', section: 'xy', label: 'Mängd höjdled', kind: 'range', min: -1, max: 1, def: 0.8, local: true },
+  { id: 'xyHold', section: 'xy', label: 'Stanna kvar när du släpper', kind: 'bool', def: false, local: true },
 ];
 
 export const PARAM_BY_ID = Object.fromEntries(PARAMS.map((p) => [p.id, p]));
@@ -174,7 +198,8 @@ export const PARAM_BY_ID = Object.fromEntries(PARAMS.map((p) => [p.id, p]));
 // Continuous parameters that the gyro can push around.
 export const GYRO_TARGETS = ['none', 'fltCutoff', 'clPos', 'clSize', 'clDensity', 'clTexture', 'clPitch', 'rgStructure',
   'rgBright', 'rgDamp', 'rgPos', 'plHarm', 'plTimbre', 'plMorph', 'grPos', 'grPitch', 'grSize', 'grDensity', 'rvbMix',
-  'rvbSize', 'dlyMix', 'dlyFb', 'resQ', 'resBright', 'drive', 'synTimbre', 'synMorph', 'noise', 'ambient'];
+  'rvbSize', 'dlyMix', 'dlyFb', 'resQ', 'resBright', 'resPulses', 'resPulseLen', 'bbRate', 'smpPitch', 'drive',
+  'synTimbre', 'synMorph', 'noise', 'ambient'];
 const targetLabel = (id) => {
   if (id === 'none') return 'Inget';
   const p = PARAM_BY_ID[id];
@@ -184,6 +209,8 @@ const targetLabel = (id) => {
 for (const p of PARAMS) if (p.targets) p.options = GYRO_TARGETS.map(targetLabel);
 PARAM_BY_ID.gyroA.def = GYRO_TARGETS.indexOf('fltCutoff');
 PARAM_BY_ID.gyroB.def = GYRO_TARGETS.indexOf('rvbMix');
+PARAM_BY_ID.xyX.def = GYRO_TARGETS.indexOf('clPos');
+PARAM_BY_ID.xyY.def = GYRO_TARGETS.indexOf('rgStructure');
 
 export function defaults() {
   return Object.fromEntries(PARAMS.map((p) => [p.id, p.def]));
@@ -241,6 +268,17 @@ export const PRESETS = {
   'Klockskog': {
     plLevel: 0.5, plEngine: 20, plMode: 0, plHarm: 0.6, plTimbre: 0.5, plMorph: 0.6, plDecay: 0.7, arpRate: 1,
     arpChance: 0.45, rgLevel: 0.4, rgModel: 3, clLevel: 0.35, rvbMix: 0.6, rvbSize: 0.9, color: 2,
+  },
+  'Gecho-puls': {
+    noise: 0.6, resLevel: 0.85, resMode: 1, resPulses: 0.55, resPulseLen: 90, resQ: 0.8, resOct: 3, rgLevel: 0.35,
+    rgModel: 0, clLevel: 0.25, plLevel: 0, grLevel: 0, dlyMix: 0.35, dlyDiv: 2, rvbMix: 0.45, bpm: 96,
+  },
+  'Bytebeat-kör': {
+    noise: 0, bbLevel: 0.7, bbFormula: 2, resLevel: 0.8, resMode: 2, resPulses: 0.8, resPulseLen: 200, resQ: 0.85,
+    rgLevel: 0.5, rgModel: 1, clLevel: 0.3, plLevel: 0, grLevel: 0, rvbMix: 0.5,
+  },
+  'Ackord-sampler': {
+    smpLevel: 0.7, smpMode: 0, rgLevel: 0.3, clLevel: 0.35, plLevel: 0, resLevel: 0.15, grLevel: 0.2, rvbMix: 0.45,
   },
   'Lizard klassisk': {
     rgLevel: 0, clLevel: 0, plLevel: 0, resLevel: 0.7, grLevel: 0.5, synLevel: 0.25,

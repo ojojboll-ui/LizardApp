@@ -72,14 +72,20 @@ class ResonatorBank {
     this.gainT = new Float64Array(RES_N);
     this.pl = new Float64Array(RES_N);
     this.pr = new Float64Array(RES_N);
+    this.noteIdx = new Int32Array(RES_N);
+    this.exc = new Float64Array(RES_N).fill(1); // input gate per filter (pulsed modes)
+    this.excDecay = 1;
     this.norm = 0.1;
   }
+  // open the input of every filter that belongs to chord note j
+  hit(j) { for (let k = 0; k < RES_N; k++) if (this.noteIdx[k] === j) this.exc[k] = 1; }
   update(notes, octaves, bright, spread, q, glideC) {
     let i = 0;
     const n = notes.length;
     for (let o = 0; o < octaves; o++) {
       for (let j = 0; j < n && i < RES_N; j++, i++) {
         this.target[i] = mtof(notes[j] + 12 * o);
+        this.noteIdx[i] = j;
         this.gainT[i] = o === 0 ? 1 : Math.pow(bright, o) * 1.2;
         const pos = n > 1 ? j / (n - 1) : 0.5;
         const pan = ((i & 1) ? 1 : -1) * spread * (0.4 + 0.6 * pos);
@@ -98,10 +104,13 @@ class ResonatorBank {
   }
   tick(x, out) {
     let l = 0, r = 0;
+    const dec = this.excDecay;
     for (let k = 0; k < RES_N; k++) {
       const g = this.gain[k];
       if (g < 1e-4) continue;
-      const y = this.f[k].tick(x) * g;
+      const e = this.exc[k];
+      this.exc[k] = e * dec;
+      const y = this.f[k].tick(x * e) * g;
       l += y * this.pl[k]; r += y * this.pr[k];
     }
     out[0] = l * this.norm; out[1] = r * this.norm;
@@ -364,7 +373,19 @@ class Plate {
   }
 }
 
+// ───────────────────────── Bytebeat ─────────────────────────
+// Classic one-liners; t ticks at the bytebeat rate, output is 8-bit.
+const BYTEBEATS = [
+  (t) => t * (42 & (t >> 10)),
+  (t) => t * (((t >> 12) | (t >> 8)) & 63 & (t >> 4)),
+  (t) => ((t * 5) & (t >> 7)) | ((t * 3) & (t >> 10)),
+  (t) => (t * ((t >> 5) | (t >> 8))) >> (t >> 16),
+  (t) => ((t >> 6) | t | (t >> (t >> 16))) * 10 + ((t >> 11) & 7),
+  (t) => t * (((t >> 9) | (t >> 13)) & 25 & (t >> 6)),
+];
+
 // ───────────────────────── Engine ─────────────────────────
+const SMP_MAX_S = 6;
 const ARP_STEPS = [1, 2, 3, 4];
 const DLY_BEATS = [0.25, 0.5, 0.75, 1, 1.5, 2];
 const LOOP_BARS = [1, 2, 4, 8];
@@ -390,6 +411,8 @@ class LizardEngine extends AudioWorkletProcessor {
       master: 0.8, progLen: 2, chordBars: 1,
       plLevel: 0, plEngine: 8, plHarm: 0.5, plTimbre: 0.5, plMorph: 0.5, plDecay: 0.5, plColour: 0.5, plMode: 0, plVoices: 4, plOct: 0, plAux: 0,
       rgLevel: 0, rgModel: 0, rgStructure: 0.4, rgBright: 0.5, rgDamp: 0.6, rgPos: 0.3, rgPluck: 0, rgVoices: 4, rgOct: 0,
+      resMode: 0, resPulses: 0.5, resPulseLen: 120, bbLevel: 0, bbFormula: 0, bbRate: 8000,
+      smpLevel: 0, smpMode: 0, smpPitch: 0, smpOct: 0,
       clLevel: 0, clMode: 0, clPos: 0.4, clSize: 0.5, clPitch: 0, clDensity: 0.65, clTexture: 0.5, clSpread: 0.6, clFeedback: 0.2, clReverb: 0.3, clFollow: true, clSend: 0,
     };
 
@@ -402,6 +425,14 @@ class LizardEngine extends AudioWorkletProcessor {
     this.plTrig = []; this.plVoice = 0;
     this.miOff = { plaits: 12 * Math.log2(47872.34 / sr), rings: 12 * Math.log2(48000 / sr) };
     this.rootPcs = [0]; this.rootShift = 0;
+
+    // Gecho modes
+    this.step16 = -1; this.resArp = 0; this.barBase = 0;
+    this.bbT = 0; this.bbPh = 0; this.bbVal = 0;
+    this.smpBuf = new Float32Array(Math.floor(sr * SMP_MAX_S));
+    this.smpLen = 0; this.smpW = 0; this.smpRec = false; this.smpRoot = 0;
+    this.smpPh = new Float64Array(4).map((_, i) => i * 0.13);
+    this.smpShots = Array.from({ length: 6 }, () => ({ on: false, pos: 0, rate: 1, pan: 0 }));
     this.res = new ResonatorBank(sr);
     this.gran = new Granular(sr, 20);
     this.ks = Array.from({ length: 8 }, () => new KSVoice());
@@ -435,7 +466,7 @@ class LizardEngine extends AudioWorkletProcessor {
     this.t = 0;
 
     // smoothed gains
-    this.sm = { resLevel: 0, grLevel: 0, synLevel: 0, rgLevel: 0, plLevel: 0, clLevel: 0, monitor: 0, loopLevel: 0.9, dlyMix: 0, rvbMix: 0, master: 0, drive: 0 };
+    this.sm = { smpLevel: 0, resLevel: 0, grLevel: 0, synLevel: 0, rgLevel: 0, plLevel: 0, clLevel: 0, monitor: 0, loopLevel: 0.9, dlyMix: 0, rvbMix: 0, master: 0, drive: 0 };
     this.smK = 1 - Math.exp(-1 / (0.02 * sr));
 
     this.dcX = 0; this.dcY = 0;
@@ -459,10 +490,16 @@ class LizardEngine extends AudioWorkletProcessor {
         this.chords = m.chords;
         this.keyRoot = m.keyRoot;
         this.rootPcs = m.rootPcs || [m.keyRoot];
-        this.chordIdx %= this.chords.length;
+        this.chordIdx = m.reset ? 0 : this.chordIdx % this.chords.length;
+        if (m.reset) this.barBase = Math.floor(this.beat / 4);
         this.setChord(this.chordIdx, false);
         break;
       case 'freeze': this.frozen = m.on; this.gran.frozen = m.on; break;
+      case 'sampler':
+        if (m.action === 'rec') { this.smpRec = true; this.smpW = 0; }
+        else if (m.action === 'stop') this.stopSampling(m.root);
+        else if (m.action === 'clear') { this.smpRec = false; this.smpLen = 0; this.postSampler(); }
+        break;
       case 'loop': this.loopAction(m.action); break;
       case 'record':
         if (m.on) { this.recording = true; this.recPos = 0; } else { this.flushRec(true); this.recording = false; }
@@ -514,6 +551,7 @@ class LizardEngine extends AudioWorkletProcessor {
     if (notify) {
       const p = this.p;
       if (p.rgPluck > 0) this.rgStrum.fill(true);
+      if (p.smpMode === 2) c.forEach((nn) => this.sampleShot(nn));
       if (p.plMode === 2) {
         const gap = Math.round(this.sr * 0.03);
         c.forEach((nn, i) => this.pending.push({ t: this.t + i * gap, n: nn + 12 * p.plOct, vel: 1, pl: true }));
@@ -575,7 +613,7 @@ class LizardEngine extends AudioWorkletProcessor {
     if (beatInBar === 0) {
       const bar = this.beat / 4;
       const per = CHORD_BARS[p.chordBars] || 1;
-      if (bar % per === 0 && bar > 0) {
+      if ((bar - this.barBase) % per === 0 && bar > this.barBase) {
         this.setChord((this.chordIdx + 1) % this.chords.length, true);
       }
       if (this.loopState === 'armed') {
@@ -604,7 +642,8 @@ class LizardEngine extends AudioWorkletProcessor {
     const js = p.synModel !== 1 && p.synLevel > 0.001;
     const pl = this.mi && p.plMode === 0 && p.plLevel > 0.001;
     const rg = this.mi && p.rgPluck === 2 && p.rgLevel > 0.001;
-    if (!js && !pl && !rg) return;
+    const sp = p.smpMode === 1 && p.smpLevel > 0.001 && this.smpLen > 0;
+    if (!js && !pl && !rg && !sp) return;
     if (Math.random() > p.arpChance) return;
     const base = this.chord;
     const notes = base.concat(base.map((n) => n + 12));
@@ -627,6 +666,76 @@ class LizardEngine extends AudioWorkletProcessor {
     if (js) this.triggerNote(note + 12 * p.synOct, vel);
     if (pl) this.plTrig.push(note + 12 * p.plOct);
     if (rg) this.rgStrum[(Math.random() * 4) | 0] = true;
+    if (sp) this.sampleShot(note);
+  }
+
+  // ── Gecho: pulsed filter modes, driven by a 16th-note clock ──
+  onStep16(step) {
+    const p = this.p, n = this.chord.length;
+    if (p.resMode === 1) {
+      // euclidean rhythm per chord tone, each with its own density and rotation
+      const w = [1, 0.75, 0.5, 0.62, 0.4];
+      for (let j = 0; j < n; j++) {
+        const hits = Math.max(1, Math.round(p.resPulses * 16 * w[j % 5]));
+        if ((((step + j * 3) * hits) % 16) < hits) this.res.hit(j);
+      }
+    } else if (p.resMode === 2) {
+      const every = p.resPulses > 0.66 ? 1 : p.resPulses > 0.33 ? 2 : 4;
+      if (step % every === 0) this.res.hit(this.resArp++ % n);
+    } else if (p.resMode === 3) {
+      const hits = Math.max(1, Math.round(p.resPulses * 8));
+      if ((step * hits) % 16 < hits) for (let j = 0; j < n; j++) this.res.hit(j);
+    }
+  }
+
+  // ── Gecho: chord sampler (a mic sample re-pitched in real time) ──
+  stopSampling(root) {
+    if (!this.smpRec) return;
+    this.smpRec = false;
+    const n = this.smpW, f = Math.min(256, n >> 2), b = this.smpBuf;
+    for (let i = 0; i < f; i++) { b[i] *= i / f; b[n - 1 - i] *= i / f; }
+    this.smpLen = n > this.sr * 0.05 ? n : 0;
+    if (root != null) this.smpRoot = root;
+    this.postSampler();
+  }
+  postSampler() {
+    this.port.postMessage({ type: 'samplerState', rec: this.smpRec, len: this.smpLen / this.sr });
+  }
+  // semitones from the sample's own pitch to `note`, keeping the chord's shape
+  sampleSemis(note) {
+    const c0 = this.chord[0];
+    const shift = ((((c0 - this.smpRoot) % 12) + 18) % 12) - 6;
+    return note - c0 + shift + this.p.smpPitch + 12 * this.p.smpOct;
+  }
+  sampleShot(note) {
+    let v = this.smpShots.find((x) => !x.on) || this.smpShots[0];
+    v.on = true; v.pos = 0; v.rate = Math.pow(2, this.sampleSemis(note) / 12); v.pan = Math.random() * 1.2 - 0.6;
+  }
+  tickSampler(out) {
+    const b = this.smpBuf, len = this.smpLen;
+    let l = 0, r = 0;
+    if (this.p.smpMode === 0) {
+      // seamless drone: two crossfaded read heads per chord tone
+      const c = this.chord, nv = Math.min(4, c.length);
+      for (let v = 0; v < nv; v++) {
+        let ph = this.smpPh[v] + Math.pow(2, this.sampleSemis(c[v]) / 12) / len;
+        if (ph >= 1) ph -= 1;
+        this.smpPh[v] = ph;
+        const ph2 = ph < 0.5 ? ph + 0.5 : ph - 0.5;
+        const w1 = Math.sin(Math.PI * ph) ** 2;
+        const y = b[(ph * len) | 0] * w1 + b[(ph2 * len) | 0] * (1 - w1);
+        if (v & 1) { r += y; l += y * 0.4; } else { l += y; r += y * 0.4; }
+      }
+    }
+    for (const s of this.smpShots) {
+      if (!s.on) continue;
+      const i0 = s.pos | 0;
+      if (i0 >= len - 1) { s.on = false; continue; }
+      const y = b[i0] + (b[i0 + 1] - b[i0]) * (s.pos - i0);
+      l += y * (0.7 - s.pan * 0.5); r += y * (0.7 + s.pan * 0.5);
+      s.pos += s.rate;
+    }
+    out[0] = l * 0.5; out[1] = r * 0.5;
   }
 
   // Render Plaits, Rings and Clouds for this block from the prepared mic input.
@@ -726,8 +835,23 @@ class LizardEngine extends AudioWorkletProcessor {
       } else this.agcGain += (1 - this.agcGain) * this.agcK;
       const mic = this.dcY * this.agcGain * p.inGain;
       micBuf[i] = mic;
-      resInBuf[i] = mic * (1 - p.noise) + (Math.random() * 2 - 1) * p.noise * 0.35;
+      let ri = mic * (1 - p.noise) + (Math.random() * 2 - 1) * p.noise * 0.35;
+      if (p.bbLevel > 0.001) {
+        this.bbPh += p.bbRate / sr;
+        while (this.bbPh >= 1) {
+          this.bbPh -= 1;
+          this.bbVal = ((BYTEBEATS[p.bbFormula] || BYTEBEATS[0])(this.bbT++ | 0) & 255) / 128 - 1;
+        }
+        ri += this.bbVal * p.bbLevel * 0.3;
+      }
+      resInBuf[i] = ri;
+      if (this.smpRec) {
+        this.smpBuf[this.smpW++] = mic;
+        if (this.smpW >= this.smpBuf.length) this.stopSampling(null);
+      }
     }
+    this.res.excDecay = p.resMode === 0 ? 1 : Math.exp(-1 / (p.resPulseLen * sr / 1000));
+    if (p.resMode === 0) this.res.exc.fill(1);
     const mi = this.mi;
     if (mi) this.renderMI(n, glideC);
 
@@ -748,7 +872,9 @@ class LizardEngine extends AudioWorkletProcessor {
 
       // transport
       this.beatPhase += beatInc;
-      if (this.beatPhase >= 1) { this.beatPhase -= 1; this.beat++; this.arpStep = -1; this.onBeat(); }
+      if (this.beatPhase >= 1) { this.beatPhase -= 1; this.beat++; this.arpStep = -1; this.step16 = -1; this.onBeat(); }
+      const s16 = (this.beatPhase * 4) | 0;
+      if (s16 !== this.step16) { this.step16 = s16; if (p.resMode) this.onStep16((this.beat % 4) * 4 + s16); }
       const st = (this.beatPhase * steps) | 0;
       if (st !== this.arpStep) { this.arpStep = st; this.onArpStep(); }
       while (this.pending.length && this.pending[0].t <= this.t) {
@@ -788,6 +914,11 @@ class LizardEngine extends AudioWorkletProcessor {
         L += tmp[0] * sm.synLevel; R += tmp[1] * sm.synLevel;
       }
       L += mic * sm.monitor; R += mic * sm.monitor;
+      sm.smpLevel += (p.smpLevel - sm.smpLevel) * smK;
+      if (this.smpLen > 0 && sm.smpLevel > 1e-4) {
+        this.tickSampler(tmp);
+        L += tmp[0] * sm.smpLevel; R += tmp[1] * sm.smpLevel;
+      }
 
       // Mutable Instruments
       if (mi) {

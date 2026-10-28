@@ -12,7 +12,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <title>Lizard Loopsynth</title>
-  <link rel="stylesheet" href="style.css?v=1">
+  <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
   <header class="top">
@@ -25,6 +25,7 @@
   <main>
     <section id="play" class="view">
       <div id="chords" class="chords"></div>
+      <div id="songInfo" class="songinfo" hidden></div>
 
       <div class="listen">
         <canvas id="chroma"></canvas>
@@ -41,6 +42,9 @@
         <button id="btnUndo" class="pad small" type="button" disabled><b>ÅNGRA</b><small>senaste dubb</small></button>
         <button id="btnClear" class="pad small" type="button"><b>RENSA</b><small>töm loopen</small></button>
         <button id="btnRec" class="pad small rec" type="button"><b>SPELA IN</b><small>till wav-fil</small></button>
+        <button id="btnSample" class="pad small" type="button"><b>SAMPLA</b><small>ljud → ackord</small></button>
+        <button id="btnSong" class="pad small" type="button"><b>MAGISK LÅT</b><small>ur slumpen</small></button>
+        <button id="btnMode" class="pad small" type="button"><b>GECHO-LÄGE</b><small>Klassisk</small></button>
       </div>
       <div class="loopprog"><i id="loopBar"></i></div>
 
@@ -49,6 +53,8 @@
         <button id="btnCal" type="button">Nollställ</button>
         <div id="gyroPad" class="gyropad off"><i id="gyroDot"></i></div>
       </div>
+
+      <div id="xyPad" class="xypad"><i id="xyDot"></i><span id="xyLabel"></span></div>
 
       <div id="macros" class="macros"></div>
     </section>
@@ -83,6 +89,6 @@
   <div id="resume" class="overlay" hidden><div class="card"><button type="button">Tryck för att fortsätta</button></div></div>
   <div id="toast" class="toast"></div>
 
-  <script type="module" src="js/main.js?v=2"></script>
+  <script type="module" src="js/main.js?v=3"></script>
 </body>
 </html>

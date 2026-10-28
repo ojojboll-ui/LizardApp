@@ -167,3 +167,29 @@ input[type=range]::-moz-range-thumb { width: 24px; height: 24px; border-radius: 
   background: #000c; padding: 10px 16px; border-radius: 20px; font-size: 14px; max-width: calc(100vw - 32px); text-align: center;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+.songinfo {
+  margin-top: 8px; padding: 8px 12px; border-radius: 10px; background: var(--panel2);
+  border: 1px solid var(--accent2); display: flex; flex-direction: column; gap: 2px; font-size: 13px;
+}
+.songinfo b { color: var(--accent2); }
+.songinfo span { color: var(--muted); }
+#btnSong.active { background: var(--accent2); border-color: var(--accent2); color: #2a2208; }
+#btnSong.active small { color: #4a3d10; }
+
+.xypad {
+  position: relative; margin-top: 12px; height: 170px; border-radius: var(--radius);
+  background:
+    linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 25% 25%,
+    linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 25% 25%,
+    var(--panel);
+  border: 1px solid var(--line); touch-action: none; overflow: hidden;
+}
+.xypad i {
+  position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%;
+  background: var(--accent); opacity: 0.55; box-shadow: 0 0 18px var(--accent); pointer-events: none;
+}
+.xypad.touch i { opacity: 1; }
+.xypad span { position: absolute; left: 10px; bottom: 8px; right: 10px; font-size: 11px; color: var(--muted); pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.note { color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
+.songinfo[hidden] { display: none; }

@@ -20,7 +20,11 @@ Appen är en statisk webbsida och behöver inget byggsteg. För att köra lokalt
 | **Rings** ✦ | Mutable Instruments | Riktiga Rings. Fyra resonatorer, en per ackordton, som mikrofonen (eller brus) får ringa i. Alla 6 modeller finns: modal, sympatiska strängar, sträng, FM-röst, kvantiserade strängar och sträng + reverb. Den kan också plocka själv vid ackordbyte eller i takt med arpen. |
 | **Clouds** ✦ | Mutable Instruments | Riktiga Clouds med alla 4 lägen: granulär, stretch, looping delay och spektral. Pitch kan följa ackordets grundton. Synthar och resonatorer kan skickas in i Clouds. |
 | **Plaits** ✦ | Mutable Instruments | Riktiga Plaits med alla 24 motorer, upp till 4 röster. Spelsätt: arp, ackord-drone eller strum vid ackordbyte. |
-| **Gecho-resonator** | Gecho | Egenskriven: mikrofonen (eller brus) går genom 16 resonanta filter stämda till ackordet. |
+| **Gecho-resonator** | Gecho | Egenskriven: mikrofonen (eller brus, eller bytebeat) går genom 16 resonanta filter som är stämda till ackordet. Fyra filterlägen: *Klassisk*, *Rytmisk* (en euklidisk rytm per ackordton), *Arpeggio* och *Puls*. |
+| **Magisk låt** | Gecho | En hel låt växer fram ur ett slumptal från mikrofonens brus. Talet bestämmer tempo, tonart, ljudpalett, tre ackorddelar och ett arrangemang (intro, delar, outro) där olika lager tonas in och ut. Samma nummer ger alltid samma låt. |
+| **Ackord-sampler** | Gecho | Sampla upp till 6 s. Samplet spelas i ackordets toner: som drone, med arpen eller vid ackordbyte. Tonhöjden kan böjas i realtid med gyro eller sensorplattan. |
+| **Bytebeat** | | Sex klassiska bytebeat-formler som excitation för Gecho-filtren och Rings. |
+| **Sensorplatta** | Gechos IR-sensorer | En XY-platta där fingret styr två valfria parametrar. Den kan fjädra tillbaka eller stanna kvar. |
 | **Ackord-grains** | Clouds | Egenskriven: korn ur de senaste 20 sekunderna, där varje korn tonhöjdsförskjuts till en ackordton. |
 | **Lizard-synth** | Plaits | Egenskriven: Karplus-Strong-strängar, pad och FM-klockor. |
 | **Effekter** | | SVF-filter (LP/BP/HP), drive, ping-pong-delay med tape-wow, Dattorro-plattreverb och limiter. |
@@ -37,7 +41,8 @@ js/params.js          alla parametrar och inbyggda presets
 js/engine-worklet.js  ljudmotorn (AudioWorklet)
 js/chords.js          lyssnare och ackordhjärna
 js/storage.js         presets, sessioner (IndexedDB), wav-export
-js/main.js            UI, gyro, kopplingar
+js/main.js            UI, gyro, sensorplatta, kopplingar
+js/song.js            magiska låtar (seedad generator)
 js/mi.wasm            Plaits + Rings + Clouds kompilerade till WebAssembly
 wasm/lizard_mi.cc     C++-brygga mellan ljudmotorn och MI-koden
 wasm/build.sh         bygger js/mi.wasm (clang + wasi-libc)
@@ -60,6 +65,5 @@ Om det knastrar på en äldre telefon kan du sänka *Röster* i Plaits eller *Re
 ## Plan framåt
 
 - Fler MI-moduler: Elements (modal synth), Warps (ring-/vocoder-modulering av mic × synth), Beads och Marbles slumpgenerator.
-- Fler Gecho-lägen: rytmiska filter och "magic songs".
 - XY-pad, MIDI-ut och Ableton Link.
 - Om latensen behöver bli lägre: bygg en native iOS-app (AUv3) med samma DSP-kärna.
