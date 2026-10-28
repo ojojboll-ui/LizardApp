@@ -20,6 +20,8 @@ Appen är en statisk webbsida och behöver inget byggsteg. För att köra lokalt
 | **Rings** ✦ | Mutable Instruments | Riktiga Rings. Fyra resonatorer, en per ackordton, som mikrofonen (eller brus) får ringa i. Alla 6 modeller finns: modal, sympatiska strängar, sträng, FM-röst, kvantiserade strängar och sträng + reverb. Den kan också plocka själv vid ackordbyte eller i takt med arpen. |
 | **Clouds** ✦ | Mutable Instruments | Riktiga Clouds med alla 4 lägen: granulär, stretch, looping delay och spektral. Pitch kan följa ackordets grundton. Synthar och resonatorer kan skickas in i Clouds. |
 | **Plaits** ✦ | Mutable Instruments | Riktiga Plaits med alla 24 motorer, upp till 4 röster. Spelsätt: arp, ackord-drone eller strum vid ackordbyte. |
+| **Elements** ✦ | Mutable Instruments | Riktiga Elements, ett modalt instrument där stråke, blås och anslag exciterar en resonator (modal, sträng, strängar). Easter egg-rösten *Ominous* finns också. Mikrofonen går in i excitern. Spelsätt: drone på grundtonen, följ arpen/Marbles eller vid ackordbyte. Körs i 32 kHz med omsampling. |
+| **Beads** ✦ | Mutable Instruments | Riktiga Beads, Clouds efterföljare. Mikrofonen blir korn med time, size, shape och pitch (som kan följa ackordet). Media: digital eller ren tejp. Kornen kan komma fritt från density eller från arpen/Marbles. *FRÖ* slår an ett korn för hand, och size i botten ger delay-läge. |
 | **Warps** ✦ | Mutable Instruments | Riktiga Warps där mikrofonen modulerar en bärvåg: synthar (Plaits, Lizard, sampler) eller Warps egen oscillator på ackordets grundton. Algoritmer: crossfade, wavefolder, analog och digital ringmodulering, XOR, komparator och vocoder. Körs i 96 kHz med 2× översampling, som på hårdvaran. |
 | **Marbles** ✦ | Mutable Instruments | Riktiga Marbles som kan ersätta arpen. T-grindarna klockas av appens tempo i alla 7 lägen (bland annat Bernoulli, kluster, trummor och Markov). X-tonerna kvantiseras till en skala som byggs av ackordet. Déjà vu låser eller muterar slingan, och Y (långsam slump) kan styra valfri parameter. |
 | **Ekorum** | Gecho | Plockar in ljudet och spelar upp det i upp till 6 ekon, vart och ett med egen tid, tonhöjd/riktning, klang och mängd eget reverb. Lägen: rytmiska ekon, rum → katedral, shimmer, baklänges och slump. *FÅNGA EKO* tar den senaste takten och låter den gå runt. |
@@ -46,7 +48,7 @@ js/chords.js          lyssnare och ackordhjärna
 js/storage.js         presets, sessioner (IndexedDB), wav-export
 js/main.js            UI, gyro, sensorplatta, kopplingar
 js/song.js            magiska låtar (seedad generator)
-js/mi.wasm            Plaits, Rings, Clouds, Warps, Marbles kompilerade till WebAssembly
+js/mi.wasm            Plaits, Rings, Clouds, Elements, Beads, Warps, Marbles som WebAssembly
 wasm/lizard_*.cc      C++-bryggor mellan ljudmotorn och MI-koden
 wasm/build.sh         bygger js/mi.wasm (clang + wasi-libc)
 wasm/eurorack/        MI:s källkod (MIT-licens, oförändrad)
@@ -54,7 +56,7 @@ wasm/eurorack/        MI:s källkod (MIT-licens, oförändrad)
 
 ## Mutable Instruments-koden
 
-Plaits, Rings, Clouds, Warps och Marbles är Emilie Gillets originalkod från [pichenettes/eurorack](https://github.com/pichenettes/eurorack) och [stmlib](https://github.com/pichenettes/stmlib). Den är MIT-licensierad. Endast DSP-delarna är medtagna, och de är oförändrade; licensen finns i `wasm/eurorack/stmlib/LICENSE`. Bryggan `wasm/lizard_mi.cc` anpassar modulernas blockstorlekar (Plaits 12, Rings 24, Clouds 32) till webbläsarens 128 samples. Clouds körs i 32 kHz med omsampling, precis som på hårdvaran.
+Plaits, Rings, Clouds, Elements, Beads, Warps och Marbles är Emilie Gillets originalkod från [pichenettes/eurorack](https://github.com/pichenettes/eurorack) och [stmlib](https://github.com/pichenettes/stmlib). Den är MIT-licensierad. Endast DSP-delarna är medtagna, och de är oförändrade; licensen finns i `wasm/eurorack/stmlib/LICENSE`. Bryggan `wasm/lizard_mi.cc` anpassar modulernas blockstorlekar (Plaits 12, Rings 24, Clouds 32) till webbläsarens 128 samples. Clouds körs i 32 kHz med omsampling, precis som på hårdvaran.
 
 För att bygga om `js/mi.wasm` (Ubuntu 24.04):
 
@@ -63,10 +65,9 @@ sudo apt-get install clang lld wasi-libc libc++-18-dev-wasm32 libc++abi-18-dev-w
 ./wasm/build.sh
 ```
 
-Om det knastrar på en äldre telefon kan du sänka *Röster* i Plaits eller *Resonatorer* i Rings. Plaits motorer *Modal* och *Partiklar* är begränsade till 2 röster eftersom de kräver mest av processorn.
+Beads-koden publicerades av Mutable Instruments med förbehållet att den inte är verifierad på modulen; här används den digitala och den rena tejp-mediatypen (48 kHz). Om det knastrar på en äldre telefon kan du sänka *Röster* i Plaits eller *Resonatorer* i Rings, eller stänga av Elements, som kräver mest. Plaits motorer *Modal* och *Partiklar* är begränsade till 2 röster eftersom de kräver mest av processorn.
 
 ## Plan framåt
 
-- Fler MI-moduler: Elements (modal synth) och Beads.
 - XY-pad, MIDI-ut och Ableton Link.
 - Om latensen behöver bli lägre: bygg en native iOS-app (AUv3) med samma DSP-kärna.

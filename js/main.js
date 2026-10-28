@@ -137,7 +137,7 @@ async function start() {
     const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
     state.ctx = ctx;
     ctx.resume();
-    await ctx.audioWorklet.addModule('js/engine-worklet.js?v=4');
+    await ctx.audioWorklet.addModule('js/engine-worklet.js?v=5');
     const node = new AudioWorkletNode(ctx, 'lizard-engine', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
     state.node = node;
     node.port.onmessage = (e) => onEngine(e.data);
@@ -183,7 +183,7 @@ async function start() {
 // instantiates them itself. Until (or unless) they load, the Lizard engines play.
 async function loadMI(node) {
   try {
-    const bytes = await (await fetch('js/mi.wasm?v=3')).arrayBuffer();
+    const bytes = await (await fetch('js/mi.wasm?v=4')).arrayBuffer();
     node.port.postMessage({ type: 'wasm', bytes }, [bytes]);
   } catch (err) {
     toast('Kunde inte ladda Mutable Instruments-motorerna');
@@ -221,7 +221,7 @@ function onEngine(m) {
       break;
     case 'chord': onChord(m.index); break;
     case 'mi':
-      if (m.ok) toast('Plaits, Rings, Clouds, Warps och Marbles är igång');
+      if (m.ok) toast('Plaits, Rings, Clouds, Elements, Beads, Warps och Marbles är igång');
       else { console.warn(m.error); toast('Mutable Instruments kunde inte starta: ' + m.error); }
       break;
     case 'meter':
@@ -556,10 +556,10 @@ function control(id) {
 function buildPlay() {
   const macros = $('#macros');
   for (const [id, label] of [['rgLevel', 'Rings'], ['clLevel', 'Clouds'], ['plLevel', 'Plaits'], ['wpLevel', 'Warps'],
-    ['ecLevel', 'Ekorum'], ['resLevel', 'Gecho-resonator'],
+    ['ecLevel', 'Ekorum'], ['elLevel', 'Elements'], ['bdLevel', 'Beads'], ['resLevel', 'Gecho-resonator'],
     ['grLevel', 'Ackord-grains'], ['synLevel', 'Lizard-synth'], ['loopLevel', 'Loop'], ['rvbMix', 'Rymd'], ['fltCutoff', 'Filter'],
     ['ambient', 'Slump ◀▶ Omgivning'], ['clPos', 'Clouds-position'], ['plTimbre', 'Plaits-timbre'],
-    ['wpTimbre', 'Warps-timbre'], ['mbDejaVu', 'Marbles déjà vu'], ['ecFb', 'Ekon: återkoppling']]) {
+    ['elGeometry', 'Elements-geometry'], ['bdTime', 'Beads-time'], ['wpTimbre', 'Warps-timbre'], ['mbDejaVu', 'Marbles déjà vu'], ['ecFb', 'Ekon: återkoppling']]) {
     macros.append(rangeControl(id, { label, big: true }));
   }
   macros.prepend(selectControl('rgModel', 'Rings-modell'), selectControl('clMode', 'Clouds-läge'), selectControl('plEngine', 'Plaits-motor'),
@@ -588,6 +588,16 @@ function buildPlay() {
   });
   bind('wpAlgo', (v) => { $('#btnWarps').querySelector('small').textContent = WARPS_ALGOS[v]; });
   bind('wpLevel', (v) => { $('#btnWarps').classList.toggle('active', v > 0.04); });
+  const toggleLevel = (id, on = 0.75) => setParam(id, state.params[id] > 0.04 ? 0 : on);
+  $('#btnElements').addEventListener('click', () => toggleLevel('elLevel'));
+  $('#btnBeads').addEventListener('click', () => toggleLevel('bdLevel', 0.8));
+  $('#btnSeed').addEventListener('click', () => {
+    if (state.params.bdLevel < 0.04) setParam('bdLevel', 0.8);
+    state.node?.port.postMessage({ type: 'beadsSeed' });
+    flash('#btnSeed');
+  });
+  bind('elLevel', (v) => $('#btnElements').classList.toggle('active', v > 0.04));
+  bind('bdLevel', (v) => $('#btnBeads').classList.toggle('active', v > 0.04));
   $('#btnMode').addEventListener('click', () => setParam('resMode', (state.params.resMode + 1) % RES_MODES.length));
   bind('resMode', (v) => { $('#btnMode').querySelector('small').textContent = RES_MODES[v]; });
   buildXY();
@@ -618,6 +628,8 @@ function buildEdit() {
         h('button', { type: 'button', onclick: () => state.node?.port.postMessage({ type: 'sampler', action: 'clear' }) }, 'Rensa samplet')));
     }
     if (s.id === 'marbles') body.prepend(h('p', { class: 'note' }, 'När Marbles spelar ersätter den arpen: T1 spelar Plaits och Lizard-synthen, T2 slår an Gecho-filtren och Rings (Plock med arpen), T3 spelar samplern. X-tonerna kvantiseras till ackordet; X-steps bestämmer hur strikt.'));
+    if (s.id === 'elements') body.prepend(h('p', { class: 'note' }, 'Ett modalt instrument: stråke, blås och anslag exciterar en resonator. Mikrofonen går in i excitern, så rummet kan få den att låta. Elements kräver mycket processorkraft; stäng av den om det knastrar.'));
+    if (s.id === 'beads') body.prepend(h('p', { class: 'note' }, 'Clouds efterföljare. Mikrofonen spelas in kontinuerligt och blir till korn. Size i botten ger delay-läge. FRYS fryser även Beads, och FRÖ-knappen slår an ett korn för hand.'));
     if (s.id === 'warps') body.prepend(h('p', { class: 'note' }, 'Mikrofonen modulerar bärvågen. Prova Vocoder med Plaits som ackord-drone och prata eller sjung.'));
     if (s.id === 'echo') body.prepend(h('p', { class: 'note' }, 'Plockar in ljudet och spelar upp det i flera ekon, vart och ett med egen tid, tonhöjd, klang och rymd. FÅNGA EKO tar senaste takten och låter den gå runt i ekorummet.'));
     if (s.id === 'song') {

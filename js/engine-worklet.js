@@ -527,6 +527,11 @@ class LizardEngine extends AudioWorkletProcessor {
       wpLevel: 0, wpAlgo: 6, wpTimbre: 0.5, wpCarrier: 0, wpCarLvl: 0.7, wpModLvl: 0.7, wpOct: 0,
       arpSource: 0, mbModel: 0, mbRate: 2, mbBias: 0.5, mbJitter: 0, mbDejaVu: 0.25, mbLength: 8, mbSpread: 0.5,
       mbXBias: 0.5, mbSteps: 0.8, mbRange: 0,
+      elLevel: 0, elModel: 0, elPlay: 0, elContour: 0.5, elBow: 0, elBlow: 0, elStrike: 0.8, elBowTimbre: 0.5,
+      elBlowMeta: 0.5, elBlowTimbre: 0.5, elStrikeMeta: 0.5, elStrikeTimbre: 0.5, elGeometry: 0.2, elBright: 0.5,
+      elDamp: 0.3, elPos: 0.3, elSpace: 0.5, elMic: 0.5, elOct: 0,
+      bdLevel: 0, bdMedia: 0, bdTime: 0.4, bdSize: 0.5, bdShape: 0.5, bdPitch: 0, bdFollow: true, bdDensity: 0.8,
+      bdRandom: 0.2, bdFeedback: 0.2, bdReverb: 0.3, bdSeeds: 0, bdSend: 0,
       ecLevel: 0, ecMode: 0, ecTime: 3, ecTaps: 4, ecFb: 0.35, ecSpace: 0.6, ecTone: 0.5, ecSpread: 0.7, ecSend: 0, ecCapLen: 2,
       clLevel: 0, clMode: 0, clPos: 0.4, clSize: 0.5, clPitch: 0, clDensity: 0.65, clTexture: 0.5, clSpread: 0.6, clFeedback: 0.2, clReverb: 0.3, clFollow: true, clSend: 0,
     };
@@ -538,7 +543,7 @@ class LizardEngine extends AudioWorkletProcessor {
     this.rgNote = [48, 52, 55, 59]; this.plNote = [48, 52, 55, 59];
     this.rgStrum = [false, false, false, false];
     this.plTrig = []; this.plVoice = 0;
-    this.miOff = { plaits: 12 * Math.log2(47872.34 / sr), rings: 12 * Math.log2(48000 / sr), warps: 12 * Math.log2(48000 / sr) };
+    this.miOff = { plaits: 12 * Math.log2(47872.34 / sr), rings: 12 * Math.log2(48000 / sr), warps: 12 * Math.log2(48000 / sr), elements: 0 };
     this.rootPcs = [0]; this.rootShift = 0;
 
     // Gecho modes
@@ -553,6 +558,7 @@ class LizardEngine extends AudioWorkletProcessor {
     this.carBuf = new Float32Array(128);
     this.mbScaleDirty = true; this.mbY = 0.5;
     this.echo = new EchoChamber(sr);
+    this.elNote = 48; this.elGateUntil = 0; this.bdSeed = false;
     this.res = new ResonatorBank(sr);
     this.gran = new Granular(sr, 20);
     this.ks = Array.from({ length: 8 }, () => new KSVoice());
@@ -586,7 +592,7 @@ class LizardEngine extends AudioWorkletProcessor {
     this.t = 0;
 
     // smoothed gains
-    this.sm = { wpLevel: 0, ecLevel: 0, smpLevel: 0, resLevel: 0, grLevel: 0, synLevel: 0, rgLevel: 0, plLevel: 0, clLevel: 0, monitor: 0, loopLevel: 0.9, dlyMix: 0, rvbMix: 0, master: 0, drive: 0 };
+    this.sm = { elLevel: 0, bdLevel: 0, wpLevel: 0, ecLevel: 0, smpLevel: 0, resLevel: 0, grLevel: 0, synLevel: 0, rgLevel: 0, plLevel: 0, clLevel: 0, monitor: 0, loopLevel: 0.9, dlyMix: 0, rvbMix: 0, master: 0, drive: 0 };
     this.smK = 1 - Math.exp(-1 / (0.02 * sr));
 
     this.dcX = 0; this.dcY = 0;
@@ -615,6 +621,7 @@ class LizardEngine extends AudioWorkletProcessor {
         this.setChord(this.chordIdx, false);
         break;
       case 'freeze': this.frozen = m.on; this.gran.frozen = m.on; break;
+      case 'beadsSeed': this.bdSeed = true; break;
       case 'echo':
         if (m.action === 'capture') {
           this.echo.capture(EC_CAP_BEATS[this.p.ecCapLen] ?? 4, 60 / this.p.bpm * this.sr);
@@ -655,6 +662,8 @@ class LizardEngine extends AudioWorkletProcessor {
       x.lz_init(this.sr);
       x.lz_warps_init(this.sr);
       x.lz_marbles_init(this.sr, (Math.random() * 4294967295) >>> 0);
+      x.lz_elements_init(this.sr);
+      x.lz_beads_init();
       const buf = x.memory.buffer;
       const mk = () => new Float32Array(128);
       this.mi = {
@@ -666,7 +675,11 @@ class LizardEngine extends AudioWorkletProcessor {
         mbEv: new Float32Array(buf, x.lz_mb_events_ptr(), 192),
         mbSv: new Float32Array(buf, x.lz_mb_scale_v_ptr(), 16),
         mbSw: new Float32Array(buf, x.lz_mb_scale_w_ptr(), 16),
+        elP: new Float32Array(buf, x.lz_el_params_ptr(), 16),
+        bdP: new Float32Array(buf, x.lz_bd_params_ptr(), 12),
+        bdIn: new Float32Array(buf, x.lz_beads_in_ptr(), 512),
         rL: mk(), rR: mk(), pL: mk(), pR: mk(), cL: mk(), cR: mk(), wL: mk(), wR: mk(),
+        eL: mk(), eR: mk(), bL: mk(), bR: mk(),
       };
       this.port.postMessage({ type: 'mi', ok: true });
     } catch (err) {
@@ -686,6 +699,7 @@ class LizardEngine extends AudioWorkletProcessor {
       const p = this.p;
       if (p.rgPluck > 0) this.rgStrum.fill(true);
       if (p.smpMode === 2) c.forEach((nn) => this.sampleShot(nn));
+      if (p.elPlay === 2) this.elementsNote(this.rootNote());
       if (p.plMode === 2) {
         const gap = Math.round(this.sr * 0.03);
         c.forEach((nn, i) => this.pushPending({ t: this.t + i * gap, n: nn + 12 * p.plOct, vel: 1, pl: true }));
@@ -764,6 +778,16 @@ class LizardEngine extends AudioWorkletProcessor {
     this.port.postMessage({ type: 'beat', beat: this.beat });
   }
 
+  rootNote() {
+    return 12 * (Math.round(this.p.octave) + 1) + (this.rootPc ?? this.keyRoot);
+  }
+
+  // a melodic event from the arp or Marbles: Elements plays it, Beads seeds a grain
+  elementsNote(note) {
+    this.elNote = note;
+    this.elGateUntil = this.t + this.sr * (0.04 + this.p.elContour * 0.3);
+  }
+
   pushPending(e) {
     const q = this.pending;
     let i = q.length;
@@ -782,9 +806,11 @@ class LizardEngine extends AudioWorkletProcessor {
     const note = 12 * (Math.round(p.octave) + 1) + (this.rootPc ?? this.keyRoot) + Math.round(v * 12);
     if (ch === 0) {
       if (this.mi && p.plMode === 0 && this.plActive()) this.plTrig.push(note + 12 * p.plOct);
+      if (p.elPlay === 1) this.elementsNote(note);
       if (p.synModel !== 1 && p.synLevel > 0.001) this.triggerNote(note + 12 * p.synOct, 0.6 + Math.random() * 0.4);
     } else if (ch === 1) {
       if (p.resMode !== 0) this.res.hit((Math.random() * this.chord.length) | 0);
+      if (p.bdSeeds === 1) this.bdSeed = true;
       if (p.rgPluck === 2) this.rgStrum[(Math.random() * 4) | 0] = true;
     } else {
       if (p.smpMode === 1 && this.smpLen > 0) this.sampleShot(note);
@@ -807,7 +833,9 @@ class LizardEngine extends AudioWorkletProcessor {
     const pl = this.mi && p.plMode === 0 && this.plActive();
     const rg = this.mi && p.rgPluck === 2 && p.rgLevel > 0.001;
     const sp = p.smpMode === 1 && p.smpLevel > 0.001 && this.smpLen > 0;
-    if (!js && !pl && !rg && !sp) return;
+    const el = this.mi && p.elPlay === 1 && p.elLevel > 0.001;
+    const bd = this.mi && p.bdSeeds === 1 && p.bdLevel > 0.001;
+    if (!js && !pl && !rg && !sp && !el && !bd) return;
     if (Math.random() > p.arpChance) return;
     const base = this.chord;
     const notes = base.concat(base.map((n) => n + 12));
@@ -831,6 +859,8 @@ class LizardEngine extends AudioWorkletProcessor {
     if (pl) this.plTrig.push(note + 12 * p.plOct);
     if (rg) this.rgStrum[(Math.random() * 4) | 0] = true;
     if (sp) this.sampleShot(note);
+    if (el) this.elementsNote(note + 12 * p.elOct);
+    if (bd) this.bdSeed = true;
   }
 
   // ── Gecho: pulsed filter modes, driven by a 16th-note clock ──
@@ -965,6 +995,36 @@ class LizardEngine extends AudioWorkletProcessor {
       // the vocoder runs quieter than the cross-modulation algorithms
       const g = p.wpAlgo >= 6 ? 2 : 0.6;
       for (let i = 0; i < n; i++) { mi.wL[i] *= g; mi.wR[i] *= g; }
+    }
+
+    if (p.elLevel > 0.001 || this.sm.elLevel > 1e-4) {
+      const e = mi.elP;
+      e[0] = p.elContour; e[1] = p.elBow; e[2] = p.elBlow; e[3] = p.elStrike; e[4] = p.elBowTimbre;
+      e[5] = p.elBlowMeta; e[6] = p.elBlowTimbre; e[7] = p.elStrikeMeta; e[8] = p.elStrikeTimbre;
+      e[9] = p.elGeometry; e[10] = p.elBright; e[11] = p.elDamp; e[12] = p.elPos; e[13] = p.elSpace;
+      e[14] = p.elMic; e[15] = p.elModel;
+      x.lz_elements_apply();
+      const drone = p.elPlay === 0;
+      const note = drone ? this.rootNote() + 12 * p.elOct : this.elNote;
+      x.lz_elements_note(note + this.miOff.elements, drone || this.elGateUntil > this.t ? 1 : 0);
+      mi.in.set(this.micBuf.subarray(0, n));
+      x.lz_elements_render(n);
+      copy(mi.eL, mi.eR);
+    }
+
+    if (p.bdLevel > 0.001 || this.sm.bdLevel > 1e-4) {
+      const bi = mi.bdIn, mic = this.micBuf, snd = p.bdSend;
+      for (let i = 0; i < n; i++) {
+        bi[i] = mic[i] + snd * this.prevL[i];
+        bi[256 + i] = mic[i] + snd * this.prevR[i];
+      }
+      const b = mi.bdP;
+      b[0] = p.bdTime; b[1] = p.bdSize; b[2] = p.bdShape; b[3] = p.bdPitch + (p.bdFollow ? this.rootShift : 0);
+      b[4] = p.bdDensity; b[5] = p.bdRandom; b[6] = p.bdFeedback; b[7] = p.bdReverb; b[8] = p.bdMedia;
+      b[9] = this.frozen ? 1 : 0; b[10] = p.bdSeeds;
+      if (this.bdSeed) { x.lz_beads_seed(); this.bdSeed = false; }
+      x.lz_beads_render(n);
+      copy(mi.bL, mi.bR);
     }
 
     if (p.arpSource === 1) {
@@ -1132,7 +1192,10 @@ class LizardEngine extends AudioWorkletProcessor {
         L += mi.rL[i] * sm.rgLevel * 0.8 + mi.pL[i] * sm.plLevel * 0.6;
         R += mi.rR[i] * sm.rgLevel * 0.8 + mi.pR[i] * sm.plLevel * 0.6;
         sm.wpLevel += (p.wpLevel - sm.wpLevel) * smK;
-        L += mi.wL[i] * sm.wpLevel; R += mi.wR[i] * sm.wpLevel;
+        sm.elLevel += (p.elLevel - sm.elLevel) * smK;
+        sm.bdLevel += (p.bdLevel - sm.bdLevel) * smK;
+        L += mi.wL[i] * sm.wpLevel + mi.eL[i] * sm.elLevel * 0.8 + mi.bL[i] * sm.bdLevel * 4;
+        R += mi.wR[i] * sm.wpLevel + mi.eR[i] * sm.elLevel * 0.8 + mi.bR[i] * sm.bdLevel * 4;
       }
       this.prevL[i] = L; this.prevR[i] = R; // send into Clouds / echoes next block
       if (mi) { L += mi.cL[i] * sm.clLevel * 3; R += mi.cR[i] * sm.clLevel * 3; }

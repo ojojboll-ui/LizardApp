@@ -5,8 +5,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 E=eurorack
-SRCS=(lizard_mi.cc lizard_warps.cc lizard_marbles.cc
-  $(find $E/plaits $E/rings $E/clouds $E/warps $E/marbles -name '*.cc' | sort)
+SRCS=(lizard_mi.cc lizard_warps.cc lizard_marbles.cc lizard_elements.cc lizard_beads.cc
+  $(find $E/plaits $E/rings $E/clouds $E/warps $E/marbles $E/elements $E/beads -name '*.cc' | sort)
   $E/stmlib/dsp/units.cc $E/stmlib/dsp/atan.cc $E/stmlib/utils/random.cc)
 OUT=../js/mi.wasm
 OBJ=build; mkdir -p $OBJ
@@ -22,6 +22,6 @@ clang++ --target=wasm32-wasi -O2 -mexec-model=reactor -nostartfiles /usr/lib/was
   "${objs[@]}" -o $OUT \
   -Wl,--export=_initialize $(cat lizard_*.cc | grep -oE '^[a-z].* (lz_[a-z0-9_]+)\(' | grep -oE 'lz_[a-z0-9_]+' | sed 's/^/-Wl,--export=/' | tr '\n' ' ') \
   -Wl,--strip-all \
-  -Wl,-z,stack-size=262144 -Wl,--initial-memory=8388608 -Wl,--max-memory=8388608 \
+  -Wl,-z,stack-size=262144 -Wl,--initial-memory=16777216 -Wl,--max-memory=16777216 \
   -lc++ -lc++abi
 ls -la $OUT

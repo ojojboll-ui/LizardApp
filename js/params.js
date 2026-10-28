@@ -11,6 +11,8 @@ export const SECTIONS = [
   { id: 'rings', label: 'Rings (Mutable Instruments)' },
   { id: 'clouds', label: 'Clouds (Mutable Instruments)' },
   { id: 'plaits', label: 'Plaits (Mutable Instruments)' },
+  { id: 'elements', label: 'Elements (Mutable Instruments)' },
+  { id: 'beads', label: 'Beads (Mutable Instruments)' },
   { id: 'warps', label: 'Warps (Mutable Instruments)' },
   { id: 'marbles', label: 'Marbles (Mutable Instruments)' },
   { id: 'echo', label: 'Ekorum (ekon & rum)' },
@@ -112,6 +114,42 @@ export const PARAMS = [
   { id: 'plAux', section: 'plaits', label: 'Main ◀▶ Aux-utgång', kind: 'range', min: 0, max: 1, def: 0 },
   { id: 'plVoices', section: 'plaits', label: 'Röster', kind: 'range', min: 1, max: 4, def: 4, step: 1 },
   { id: 'plOct', section: 'plaits', label: 'Oktav', kind: 'range', min: -2, max: 2, def: 1, step: 1 },
+
+  // Elements
+  { id: 'elLevel', section: 'elements', label: 'Nivå', kind: 'range', min: 0, max: 1, def: 0 },
+  { id: 'elModel', section: 'elements', label: 'Resonator', kind: 'select', options: ['Modal', 'Sträng', 'Strängar (ackord)', 'Ominous (easter egg)'], def: 0 },
+  { id: 'elPlay', section: 'elements', label: 'Spelsätt', kind: 'select', options: ['Drone på grundtonen', 'Följ arpen / Marbles', 'Vid ackordbyte'], def: 0 },
+  { id: 'elMic', section: 'elements', label: 'Mic in i exciter', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'elContour', section: 'elements', label: 'Contour (envelope)', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'elBow', section: 'elements', label: 'Bow', kind: 'range', min: 0, max: 1, def: 0 },
+  { id: 'elBowTimbre', section: 'elements', label: 'Bow timbre', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'elBlow', section: 'elements', label: 'Blow', kind: 'range', min: 0, max: 1, def: 0 },
+  { id: 'elBlowMeta', section: 'elements', label: 'Blow flow', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'elBlowTimbre', section: 'elements', label: 'Blow timbre', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'elStrike', section: 'elements', label: 'Strike', kind: 'range', min: 0, max: 1, def: 0.8 },
+  { id: 'elStrikeMeta', section: 'elements', label: 'Strike mallet', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'elStrikeTimbre', section: 'elements', label: 'Strike timbre', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'elGeometry', section: 'elements', label: 'Geometry', kind: 'range', min: 0, max: 1, def: 0.2 },
+  { id: 'elBright', section: 'elements', label: 'Brightness', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'elDamp', section: 'elements', label: 'Damping', kind: 'range', min: 0, max: 1, def: 0.3 },
+  { id: 'elPos', section: 'elements', label: 'Position', kind: 'range', min: 0, max: 1, def: 0.3 },
+  { id: 'elSpace', section: 'elements', label: 'Space', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'elOct', section: 'elements', label: 'Oktav', kind: 'range', min: -2, max: 2, def: 0, step: 1 },
+
+  // Beads
+  { id: 'bdLevel', section: 'beads', label: 'Nivå', kind: 'range', min: 0, max: 1, def: 0 },
+  { id: 'bdMedia', section: 'beads', label: 'Media', kind: 'select', options: ['Digital', 'Ren tejp'], def: 0 },
+  { id: 'bdTime', section: 'beads', label: 'Time', kind: 'range', min: 0, max: 1, def: 0.4 },
+  { id: 'bdSize', section: 'beads', label: 'Size (max = delay-läge)', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'bdShape', section: 'beads', label: 'Shape', kind: 'range', min: 0, max: 1, def: 0.5 },
+  { id: 'bdPitch', section: 'beads', label: 'Pitch', kind: 'range', min: -24, max: 24, def: 0, step: 1, unit: 'st' },
+  { id: 'bdFollow', section: 'beads', label: 'Pitch följer ackordets grundton', kind: 'bool', def: true },
+  { id: 'bdDensity', section: 'beads', label: 'Density (← jämn · slump →)', kind: 'range', min: 0, max: 1, def: 0.8 },
+  { id: 'bdRandom', section: 'beads', label: 'Slump i time/size/shape/pitch', kind: 'range', min: 0, max: 1, def: 0.2 },
+  { id: 'bdFeedback', section: 'beads', label: 'Feedback', kind: 'range', min: 0, max: 1, def: 0.2 },
+  { id: 'bdReverb', section: 'beads', label: 'Reverb', kind: 'range', min: 0, max: 1, def: 0.3 },
+  { id: 'bdSeeds', section: 'beads', label: 'Korn från', kind: 'select', options: ['Density (fritt)', 'Arpen / Marbles'], def: 0 },
+  { id: 'bdSend', section: 'beads', label: 'Skicka synthar in (utöver mic)', kind: 'range', min: 0, max: 1, def: 0 },
 
   // Warps
   { id: 'wpLevel', section: 'warps', label: 'Nivå', kind: 'range', min: 0, max: 1, def: 0 },
@@ -242,7 +280,8 @@ export const PARAM_BY_ID = Object.fromEntries(PARAMS.map((p) => [p.id, p]));
 export const GYRO_TARGETS = ['none', 'fltCutoff', 'clPos', 'clSize', 'clDensity', 'clTexture', 'clPitch', 'rgStructure',
   'rgBright', 'rgDamp', 'rgPos', 'plHarm', 'plTimbre', 'plMorph', 'grPos', 'grPitch', 'grSize', 'grDensity', 'rvbMix',
   'rvbSize', 'dlyMix', 'dlyFb', 'wpTimbre', 'wpCarLvl', 'mbBias', 'mbSpread', 'mbSteps', 'mbDejaVu', 'mbXBias',
-  'ecFb', 'ecSpace', 'ecTone', 'resQ', 'resBright', 'resPulses', 'resPulseLen', 'bbRate', 'smpPitch', 'drive',
+  'ecFb', 'ecSpace', 'ecTone', 'elGeometry', 'elBright', 'elDamp', 'elPos', 'elBow', 'elBlow', 'bdTime', 'bdSize',
+  'bdShape', 'bdDensity', 'bdPitch', 'resQ', 'resBright', 'resPulses', 'resPulseLen', 'bbRate', 'smpPitch', 'drive',
   'synTimbre', 'synMorph', 'noise', 'ambient'];
 const targetLabel = (id) => {
   if (id === 'none') return 'Inget';
@@ -351,6 +390,28 @@ export const PRESETS = {
   'Baklänges-ekon': {
     ecLevel: 0.8, ecMode: 3, ecTime: 5, ecTaps: 3, ecFb: 0.3, ecSpace: 0.6, rgLevel: 0.3, clLevel: 0.2, plLevel: 0,
     resLevel: 0.1, rvbMix: 0.3,
+  },
+  'Elements-stråke': {
+    elLevel: 0.8, elModel: 0, elPlay: 0, elBow: 0.8, elBowTimbre: 0.4, elStrike: 0, elContour: 0.8, elGeometry: 0.35,
+    elBright: 0.45, elDamp: 0.6, elSpace: 0.6, elMic: 0.4, rgLevel: 0.2, clLevel: 0.25, plLevel: 0, resLevel: 0.1,
+    grLevel: 0, rvbMix: 0.3,
+  },
+  'Elements-marimba': {
+    elLevel: 0.75, elModel: 0, elPlay: 1, elStrike: 0.9, elStrikeMeta: 0.3, elContour: 0.2, elGeometry: 0.25,
+    elDamp: 0.4, elSpace: 0.45, arpSource: 1, mbModel: 0, mbRate: 2, plLevel: 0, rgLevel: 0.25, clLevel: 0.2,
+    resLevel: 0, dlyMix: 0.25,
+  },
+  'Rummets resonans': {
+    elLevel: 0.8, elModel: 2, elPlay: 0, elStrike: 0, elBow: 0, elMic: 1, elGeometry: 0.4, elDamp: 0.75, elSpace: 0.7,
+    rgLevel: 0.3, clLevel: 0, plLevel: 0, resLevel: 0, grLevel: 0, rvbMix: 0.3,
+  },
+  'Beads-moln': {
+    bdLevel: 0.85, bdTime: 0.45, bdSize: 0.55, bdShape: 0.6, bdDensity: 0.85, bdRandom: 0.35, bdReverb: 0.5,
+    bdFeedback: 0.25, rgLevel: 0.25, clLevel: 0, plLevel: 0, resLevel: 0.1, grLevel: 0, rvbMix: 0.25,
+  },
+  'Beads-tejp': {
+    bdLevel: 0.85, bdMedia: 1, bdTime: 0.6, bdSize: 0.4, bdShape: 0.3, bdDensity: 0.25, bdRandom: 0.15,
+    bdReverb: 0.4, bdFeedback: 0.4, bdSend: 0.4, rgLevel: 0.3, plLevel: 0.25, plMode: 1, clLevel: 0, rvbMix: 0.2,
   },
   'Lizard klassisk': {
     rgLevel: 0, clLevel: 0, plLevel: 0, resLevel: 0.7, grLevel: 0.5, synLevel: 0.25,
