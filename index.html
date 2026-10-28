@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0f1410">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Lizard">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <title>Lizard Loopsynth</title>
+  <link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">🦎 <b>Lizard</b></div>
+    <div id="key" class="key">–</div>
+    <div class="beats"><i class="beat"></i><i class="beat"></i><i class="beat"></i><i class="beat"></i></div>
+    <div id="bpm" class="bpm"></div>
+  </header>
+
+  <main>
+    <section id="play" class="view">
+      <div id="chords" class="chords"></div>
+
+      <div class="listen">
+        <canvas id="chroma"></canvas>
+        <div class="meters">
+          <div class="meter"><span>IN</span><div><i id="inMeter"></i></div></div>
+          <div class="meter"><span>UT</span><div><i id="outMeter"></i></div></div>
+        </div>
+      </div>
+
+      <div class="pads">
+        <button id="btnLoop" class="pad loop" type="button"><b>LOOPA</b><small></small></button>
+        <button id="btnFreeze" class="pad" type="button"><b>FRYS</b><small>håll kvar ljudet</small></button>
+        <button id="btnNew" class="pad" type="button"><b>NY FÖLJD</b><small>nya ackord</small></button>
+        <button id="btnUndo" class="pad small" type="button" disabled><b>ÅNGRA</b><small>senaste dubb</small></button>
+        <button id="btnClear" class="pad small" type="button"><b>RENSA</b><small>töm loopen</small></button>
+        <button id="btnRec" class="pad small rec" type="button"><b>SPELA IN</b><small>till wav-fil</small></button>
+      </div>
+      <div class="loopprog"><i id="loopBar"></i></div>
+
+      <div class="gyrorow">
+        <button id="btnGyro" class="toggle" type="button">Gyro: AV</button>
+        <button id="btnCal" type="button">Nollställ</button>
+        <div id="gyroPad" class="gyropad off"><i id="gyroDot"></i></div>
+      </div>
+
+      <div id="macros" class="macros"></div>
+    </section>
+
+    <section id="edit" class="view" hidden>
+      <div id="sections"></div>
+      <p class="foot">Inspirerad av Gechologic Gecho och Mutable Instruments (Plaits, Rings, Clouds, Marbles). Använd hörlurar för att undvika rundgång.</p>
+    </section>
+  </main>
+
+  <nav class="tabs">
+    <button class="tab active" data-view="play" type="button">Spela</button>
+    <button class="tab" data-view="edit" type="button">Redigera</button>
+  </nav>
+
+  <div id="fileOffer" class="fileoffer" hidden>
+    <span id="fileName"></span>
+    <button id="fileSave" type="button">Spara / dela</button>
+    <button id="fileClose" type="button" aria-label="Stäng">✕</button>
+  </div>
+
+  <div id="start" class="overlay">
+    <div class="card">
+      <div class="logo">🦎</div>
+      <h1>Lizard Loopsynth</h1>
+      <p>Lyssnar på omgivningen och gör om den till ackord, korn och oändliga loopar.</p>
+      <p class="hint">🎧 Använd hörlurar. Appen behöver mikrofonen.</p>
+      <button type="button">Tryck för att starta</button>
+      <p id="startMsg" class="msg"></p>
+    </div>
+  </div>
+  <div id="resume" class="overlay" hidden><div class="card"><button type="button">Tryck för att fortsätta</button></div></div>
+  <div id="toast" class="toast"></div>
+
+  <script type="module" src="js/main.js?v=1"></script>
+</body>
+</html>

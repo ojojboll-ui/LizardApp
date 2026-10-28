@@ -1,0 +1,580 @@
+import { PARAMS, PARAM_BY_ID, SECTIONS, GYRO_TARGETS, PRESETS, defaults, toNorm, fromNorm, formatValue } from './params.js';
+import { Listener, ChordBrain, NOTE_NAMES } from './chords.js';
+import * as store from './storage.js';
+
+const $ = (sel, el = document) => el.querySelector(sel);
+const h = (tag, attrs = {}, ...kids) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v);
+  }
+  for (const c of kids) el.append(c);
+  return el;
+};
+
+// ───────────────────────── state ─────────────────────────
+const state = {
+  params: Object.assign(defaults(), store.loadCurrent() || {}),
+  ctx: null, node: null, analyser: null, listener: null,
+  brain: new ChordBrain(),
+  chordIdx: 0,
+  loopState: 'empty', canUndo: false,
+  manualFreeze: false, faceDown: false,
+  recording: false, recL: [], recR: [], recSr: 48000, recStart: 0,
+  gyro: { a: 0, b: 0, beta0: null, gamma0: null, beta: 0, gamma: 0, lastShake: 0 },
+  sent: {}, dirty: new Set(),
+  pendingLoop: null,
+};
+
+const ENGINE_IDS = PARAMS.filter((p) => !p.local).map((p) => p.id);
+const CHORD_IDS = new Set(['keyMode', 'scale', 'color', 'progLen', 'octave']);
+const PROG_LEN = [2, 3, 4, 6, 8];
+
+// ───────────────────────── param binding ─────────────────────────
+const bindings = {};
+function bind(id, fn) { (bindings[id] ||= []).push(fn); fn(state.params[id]); }
+
+let saveTimer = 0;
+function setParam(id, v, opts = {}) {
+  state.params[id] = v;
+  for (const fn of bindings[id] || []) if (fn !== opts.src) fn(v);
+  if (!PARAM_BY_ID[id].local) state.dirty.add(id);
+  if (CHORD_IDS.has(id) && !opts.noRegen) regenerate();
+  if (id === 'gyroOn' && v) enableGyro();
+  if (id === 'gyroA' || id === 'gyroB' || id === 'gyroOn') markAllTargetsDirty();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => store.saveCurrent(state.params), 400);
+}
+
+function applyParams(obj) {
+  for (const [k, v] of Object.entries(obj)) if (k in PARAM_BY_ID) setParam(k, v, { noRegen: true });
+  regenerate();
+}
+
+function markAllTargetsDirty() { for (const t of GYRO_TARGETS) if (t !== 'none') state.dirty.add(t); }
+
+// Effective value = base value pushed around by gyro tilt (in normalised space)
+function effective(id) {
+  const p = PARAM_BY_ID[id];
+  let v = state.params[id];
+  const P = state.params;
+  if (!P.gyroOn || p.kind !== 'range') return v;
+  let n = toNorm(p, v), mod = false;
+  if (GYRO_TARGETS[P.gyroA] === id) { n += P.gyroAAmt * state.gyro.a * 0.5; mod = true; }
+  if (GYRO_TARGETS[P.gyroB] === id) { n += P.gyroBAmt * state.gyro.b * 0.5; mod = true; }
+  return mod ? fromNorm(p, n) : v;
+}
+
+function flushParams() {
+  if (!state.node) return;
+  const values = {};
+  let any = false;
+  for (const id of state.dirty) {
+    if (PARAM_BY_ID[id].local) continue;
+    const v = effective(id);
+    if (state.sent[id] !== v) { values[id] = v; state.sent[id] = v; any = true; }
+  }
+  state.dirty.clear();
+  if (any) state.node.port.postMessage({ type: 'params', values });
+}
+
+// ───────────────────────── chords ─────────────────────────
+function sendChords() {
+  if (!state.node || !state.brain.prog.length) return;
+  state.node.port.postMessage({
+    type: 'chords', chords: state.brain.prog.map((c) => c.midis), keyRoot: state.brain.ctx.root,
+  });
+  renderChords();
+}
+
+function regenerate() {
+  state.brain.generate(state.params, state.listener, PROG_LEN[state.params.progLen] || 4);
+  sendChords();
+}
+
+function onChord(index) {
+  state.chordIdx = index;
+  const n = state.brain.prog.length;
+  // rewrite the chord that just finished (it plays again next cycle)
+  if (state.brain.mutate((index - 1 + n) % n, state.params, state.listener)) sendChords();
+  else renderChords();
+}
+
+function renderChords() {
+  const strip = $('#chords');
+  strip.replaceChildren(...state.brain.prog.map((c, i) => h('div', { class: 'chord' + (i === state.chordIdx ? ' on' : '') }, c.name)));
+  const ctx = state.brain.ctx;
+  if (ctx) {
+    const minorish = ['Moll', 'Dorisk', 'Frygisk', 'Harm. moll'].includes(ctx.scaleName);
+    $('#key').textContent = `${NOTE_NAMES[ctx.root]} ${ctx.scaleName.toLowerCase()}${ctx.auto ? ' · lyssnar' : ''}`;
+    $('#key').classList.toggle('minor', minorish);
+  }
+}
+
+// ───────────────────────── audio start ─────────────────────────
+async function start() {
+  const overlay = $('#start');
+  overlay.querySelector('button').disabled = true;
+  $('#startMsg').textContent = 'Startar…';
+  // iOS only grants motion access and starts audio from inside the tap itself
+  if (state.params.gyroOn) enableGyro();
+  try {
+    if (navigator.audioSession) navigator.audioSession.type = 'play-and-record';
+    const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+    state.ctx = ctx;
+    ctx.resume();
+    await ctx.audioWorklet.addModule('js/engine-worklet.js?v=1');
+    const node = new AudioWorkletNode(ctx, 'lizard-engine', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
+    state.node = node;
+    node.port.onmessage = (e) => onEngine(e.data);
+    node.connect(ctx.destination);
+
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 8192;
+    analyser.smoothingTimeConstant = 0;
+    state.analyser = analyser;
+    state.listener = new Listener(analyser);
+
+    let micOk = true;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
+      });
+      const src = ctx.createMediaStreamSource(stream);
+      src.connect(node);
+      src.connect(analyser);
+    } catch (err) {
+      micOk = false;
+      console.warn('mic', err);
+    }
+    await ctx.resume();
+
+    for (const id of ENGINE_IDS) state.dirty.add(id);
+    flushParams();
+    regenerate();
+    requestWakeLock();
+    overlay.hidden = true;
+    if (!micOk) toast('Ingen mikrofon – kör på brus. Tillåt mikrofonen i Safari-inställningarna.');
+    tick();
+    setInterval(listen, 100);
+  } catch (err) {
+    console.error(err);
+    $('#startMsg').textContent = 'Kunde inte starta ljudet: ' + err.message;
+    overlay.querySelector('button').disabled = false;
+  }
+}
+
+let wakeLock = null;
+async function requestWakeLock() {
+  try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { /* not supported */ }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !state.ctx) return;
+  requestWakeLock();
+  if (state.ctx.state !== 'running') $('#resume').hidden = false;
+});
+$('#resume').addEventListener('click', async () => { await state.ctx.resume(); $('#resume').hidden = true; });
+
+// ───────────────────────── engine messages ─────────────────────────
+function onEngine(m) {
+  switch (m.type) {
+    case 'beat': {
+      const b = m.beat % 4;
+      document.querySelectorAll('.beat').forEach((el, i) => el.classList.toggle('on', i === b));
+      break;
+    }
+    case 'chord': onChord(m.index); break;
+    case 'meter':
+      $('#inMeter').style.transform = `scaleX(${Math.min(1, Math.sqrt(m.inRms) * 2.2)})`;
+      $('#outMeter').style.transform = `scaleX(${Math.min(1, m.outPeak)})`;
+      $('#loopBar').style.transform = `scaleX(${m.loopPos})`;
+      if (m.loopState !== state.loopState) { state.loopState = m.loopState; renderLoop(); }
+      break;
+    case 'loopState': state.loopState = m.state; state.canUndo = m.canUndo; renderLoop(); break;
+    case 'rec':
+      state.recL.push(m.L); state.recR.push(m.R); state.recSr = m.sr;
+      if (m.final) finishRecording();
+      break;
+    case 'loopData': if (state.pendingLoop) { state.pendingLoop(m); state.pendingLoop = null; } break;
+  }
+}
+
+// ───────────────────────── listening + gyro loop ─────────────────────────
+let lastListen = performance.now();
+function listen() {
+  const now = performance.now();
+  const dt = (now - lastListen) / 1000;
+  lastListen = now;
+  if (!state.listener) return;
+  const before = state.listener.key;
+  state.listener.update(dt, state.params.listenMem);
+  if (state.listener.key !== before && state.params.keyMode === 0) renderChords();
+}
+
+function tick() {
+  drawChroma();
+  if (state.params.gyroOn) {
+    const P = state.params;
+    for (const sel of [P.gyroA, P.gyroB]) if (GYRO_TARGETS[sel] !== 'none') state.dirty.add(GYRO_TARGETS[sel]);
+    const dot = $('#gyroDot');
+    dot.style.transform = `translate(${state.gyro.b * 22}px, ${state.gyro.a * 22}px)`;
+  }
+  flushParams();
+  requestAnimationFrame(tick);
+}
+
+let colors = null;
+function drawChroma() {
+  const cv = $('#chroma');
+  const g = cv.getContext('2d');
+  const w = cv.width, ht = cv.height;
+  g.clearRect(0, 0, w, ht);
+  if (!state.listener) return;
+  const ch = state.listener.chroma;
+  const mx = Math.max(0.0001, ...ch);
+  const bw = w / 12;
+  const root = state.brain.ctx ? state.brain.ctx.root : -1;
+  const css = colors ||= getComputedStyle(document.documentElement);
+  for (let i = 0; i < 12; i++) {
+    const v = ch[i] / mx;
+    g.fillStyle = (i === root ? css.getPropertyValue('--accent') : css.getPropertyValue('--bar')).trim();
+    g.fillRect(i * bw + 2, ht - 14 - v * (ht - 18), bw - 4, v * (ht - 18));
+    g.fillStyle = css.getPropertyValue('--muted').trim();
+    g.font = `${10 * devicePixelRatio}px system-ui`;
+    g.textAlign = 'center';
+    g.fillText(NOTE_NAMES[i], i * bw + bw / 2, ht - 2);
+  }
+}
+
+// ───────────────────────── gyro ─────────────────────────
+let gyroListening = false;
+async function enableGyro() {
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission) {
+      const r = await DeviceOrientationEvent.requestPermission();
+      if (r !== 'granted') throw new Error('nekad');
+    }
+    if (typeof DeviceMotionEvent !== 'undefined' && DeviceMotionEvent.requestPermission) {
+      await DeviceMotionEvent.requestPermission().catch(() => {});
+    }
+  } catch {
+    toast('Gyrot behöver tillstånd. Tryck på Gyro igen.');
+    setParam('gyroOn', false);
+    return;
+  }
+  if (gyroListening) return;
+  gyroListening = true;
+  window.addEventListener('deviceorientation', onOrientation);
+  window.addEventListener('devicemotion', onMotion);
+}
+
+function onOrientation(e) {
+  if (e.beta == null) return;
+  const G = state.gyro, P = state.params;
+  if (G.beta0 == null) { G.beta0 = e.beta; G.gamma0 = e.gamma; }
+  G.beta = e.beta; G.gamma = e.gamma;
+  const r = P.gyroRange;
+  const ta = Math.max(-1, Math.min(1, -(e.beta - G.beta0) / r));
+  const tb = Math.max(-1, Math.min(1, (e.gamma - G.gamma0) / r));
+  G.a += (ta - G.a) * 0.3;
+  G.b += (tb - G.b) * 0.3;
+  const down = P.gyroOn && P.faceFreeze && Math.abs(e.beta) > 155;
+  if (down !== state.faceDown) { state.faceDown = down; sendFreeze(); }
+}
+
+function onMotion(e) {
+  const P = state.params;
+  if (!P.gyroOn || !P.shakeNew) return;
+  const a = e.acceleration;
+  if (!a || a.x == null) return;
+  const mag = Math.hypot(a.x, a.y, a.z);
+  const now = performance.now();
+  if (mag > 17 && now - state.gyro.lastShake > 1500) {
+    state.gyro.lastShake = now;
+    regenerate();
+    flash('#btnNew');
+  }
+}
+
+function calibrate() { state.gyro.beta0 = state.gyro.beta; state.gyro.gamma0 = state.gyro.gamma; toast('Gyrot nollställt'); }
+
+// ───────────────────────── transport-ish actions ─────────────────────────
+function sendFreeze() {
+  const on = state.manualFreeze || state.faceDown;
+  state.node?.port.postMessage({ type: 'freeze', on });
+  $('#btnFreeze').classList.toggle('active', on);
+}
+
+function renderLoop() {
+  const b = $('#btnLoop');
+  const label = { empty: 'LOOPA', armed: 'VÄNTAR…', dub: 'DUBBAR', play: 'SPELAR' }[state.loopState];
+  b.querySelector('b').textContent = label;
+  b.dataset.state = state.loopState;
+  b.querySelector('small').textContent = { empty: 'startar på nästa takt', armed: 'tryck för att avbryta', dub: 'tryck = sluta dubba', play: 'tryck = dubba igen' }[state.loopState];
+  $('#btnUndo').disabled = !state.canUndo;
+}
+
+function toggleRecording() {
+  if (!state.node) return;
+  if (!state.recording) {
+    state.recording = true; state.recL = []; state.recR = []; state.recStart = performance.now();
+    state.node.port.postMessage({ type: 'record', on: true });
+    $('#btnRec').classList.add('active');
+    $('#btnRec').querySelector('b').textContent = 'STOPPA';
+    recTimer();
+  } else {
+    state.node.port.postMessage({ type: 'record', on: false });
+  }
+}
+function recTimer() {
+  if (!state.recording) return;
+  const s = Math.floor((performance.now() - state.recStart) / 1000);
+  $('#btnRec').querySelector('small').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  setTimeout(recTimer, 500);
+}
+async function finishRecording() {
+  state.recording = false;
+  $('#btnRec').classList.remove('active');
+  $('#btnRec').querySelector('b').textContent = 'SPELA IN';
+  $('#btnRec').querySelector('small').textContent = 'till wav-fil';
+  const blob = store.encodeWav(state.recL, state.recR, state.recSr);
+  state.recL = []; state.recR = [];
+  offerFile(blob, `lizard-${store.stamp()}.wav`);
+}
+
+// Sharing needs a fresh tap on iOS, so files made asynchronously are offered
+// through a small bar with its own button.
+function offerFile(blob, name) {
+  const bar = $('#fileOffer');
+  $('#fileName').textContent = `${name} (${(blob.size / 1e6).toFixed(1)} MB)`;
+  bar.hidden = false;
+  $('#fileSave').onclick = () => store.deliverFile(blob, name);
+  $('#fileClose').onclick = () => { bar.hidden = true; };
+}
+
+function requestLoop() {
+  return new Promise((resolve) => {
+    state.pendingLoop = resolve;
+    state.node.port.postMessage({ type: 'getLoop' });
+  });
+}
+
+// ───────────────────────── UI building ─────────────────────────
+function rangeControl(id, opts = {}) {
+  const p = PARAM_BY_ID[id];
+  const val = h('span', { class: 'val' });
+  const input = h('input', { type: 'range', min: 0, max: 1, step: 0.001 });
+  const row = h('label', { class: 'ctl range' + (opts.big ? ' big' : '') }, h('span', { class: 'lbl' }, opts.label || p.label), val, input);
+  const update = (v) => { input.value = toNorm(p, v); val.textContent = formatValue(p, v); };
+  input.addEventListener('input', () => {
+    const v = fromNorm(p, parseFloat(input.value));
+    val.textContent = formatValue(p, v);
+    setParam(id, v, { src: update });
+  });
+  bind(id, update);
+  return row;
+}
+
+function selectControl(id) {
+  const p = PARAM_BY_ID[id];
+  const sel = h('select', {}, ...p.options.map((o, i) => h('option', { value: i }, o)));
+  const update = (v) => { sel.value = v; };
+  sel.addEventListener('change', () => setParam(id, parseInt(sel.value, 10), { src: update }));
+  bind(id, update);
+  return h('label', { class: 'ctl select' }, h('span', { class: 'lbl' }, p.label), sel);
+}
+
+function boolControl(id) {
+  const p = PARAM_BY_ID[id];
+  const btn = h('button', { class: 'toggle', type: 'button' });
+  const update = (v) => { btn.classList.toggle('active', !!v); btn.textContent = v ? 'På' : 'Av'; };
+  btn.addEventListener('click', () => setParam(id, !state.params[id]));
+  bind(id, update);
+  return h('div', { class: 'ctl bool' }, h('span', { class: 'lbl' }, p.label), btn);
+}
+
+function control(id) {
+  const p = PARAM_BY_ID[id];
+  if (p.kind === 'select') return selectControl(id);
+  if (p.kind === 'bool') return boolControl(id);
+  return rangeControl(id);
+}
+
+function buildPlay() {
+  const macros = $('#macros');
+  for (const [id, label] of [['resLevel', 'Resonator'], ['grLevel', 'Grains'], ['synLevel', 'Synth'], ['loopLevel', 'Loop'],
+    ['rvbMix', 'Rymd'], ['fltCutoff', 'Filter'], ['ambient', 'Slump ◀▶ Omgivning'], ['grPos', 'Grain-position']]) {
+    macros.append(rangeControl(id, { label, big: true }));
+  }
+  $('#btnLoop').addEventListener('click', () => state.node?.port.postMessage({ type: 'loop', action: 'rec' }));
+  $('#btnUndo').addEventListener('click', () => state.node?.port.postMessage({ type: 'loop', action: 'undo' }));
+  $('#btnClear').addEventListener('click', () => state.node?.port.postMessage({ type: 'loop', action: 'clear' }));
+  $('#btnFreeze').addEventListener('click', () => { state.manualFreeze = !state.manualFreeze; sendFreeze(); });
+  $('#btnNew').addEventListener('click', () => { regenerate(); flash('#btnNew'); });
+  $('#btnRec').addEventListener('click', toggleRecording);
+  $('#btnGyro').addEventListener('click', () => setParam('gyroOn', !state.params.gyroOn));
+  $('#btnCal').addEventListener('click', calibrate);
+  bind('gyroOn', (v) => {
+    $('#btnGyro').classList.toggle('active', !!v);
+    $('#btnGyro').textContent = v ? 'Gyro: PÅ' : 'Gyro: AV';
+    $('#gyroPad').classList.toggle('off', !v);
+  });
+  bind('bpm', (v) => { $('#bpm').textContent = Math.round(v) + ' bpm'; });
+  renderLoop();
+}
+
+function buildEdit() {
+  const root = $('#sections');
+  root.append(buildLibrary());
+  for (const s of SECTIONS) {
+    const ids = PARAMS.filter((p) => p.section === s.id).map((p) => p.id);
+    const body = h('div', { class: 'body' }, ...ids.map(control));
+    if (s.id === 'gyro') body.append(h('button', { class: 'wide', type: 'button', onclick: calibrate }, 'Nollställ gyrot (nuvarande läge = mitten)'));
+    if (s.id === 'tempo') body.append(tapTempo());
+    root.append(h('details', { class: 'section' }, h('summary', {}, s.label), body));
+  }
+}
+
+function tapTempo() {
+  let taps = [];
+  return h('button', {
+    class: 'wide', type: 'button', onclick: () => {
+      const now = performance.now();
+      taps = taps.filter((t) => now - t < 2500);
+      taps.push(now);
+      if (taps.length >= 3) {
+        const iv = (taps[taps.length - 1] - taps[0]) / (taps.length - 1);
+        setParam('bpm', Math.max(40, Math.min(200, Math.round(60000 / iv))));
+      }
+    },
+  }, 'Tappa tempo');
+}
+
+function buildLibrary() {
+  const presetSel = h('select', {});
+  const sessionSel = h('select', {});
+  const refresh = async () => {
+    const user = store.userPresets();
+    presetSel.replaceChildren(
+      h('optgroup', { label: 'Inbyggda' }, ...Object.keys(PRESETS).map((n) => h('option', { value: 'b:' + n }, n))),
+      h('optgroup', { label: 'Mina' }, ...Object.keys(user).map((n) => h('option', { value: 'u:' + n }, n))),
+    );
+    let names = [];
+    try { names = await store.listSessions(); } catch { /* IndexedDB blocked */ }
+    sessionSel.replaceChildren(...(names.length ? names.map((n) => h('option', { value: n }, n)) : [h('option', { value: '' }, '(inga sparade)')]));
+  };
+  const loadPreset = () => {
+    const [kind, name] = [presetSel.value.slice(0, 1), presetSel.value.slice(2)];
+    const src = kind === 'b' ? PRESETS[name] : store.userPresets()[name];
+    if (!src) return;
+    // built-ins are partial: start from defaults so presets sound the same every time
+    const keepGyro = Object.fromEntries(PARAMS.filter((p) => p.local).map((p) => [p.id, state.params[p.id]]));
+    applyParams(Object.assign(defaults(), src, kind === 'b' ? keepGyro : {}));
+    toast(`Laddade ”${name}”`);
+  };
+  const savePreset = () => {
+    const name = prompt('Namn på preset:');
+    if (!name) return;
+    store.saveUserPreset(name, { ...state.params });
+    refresh(); toast('Preset sparad');
+  };
+  const deletePreset = () => {
+    if (!presetSel.value.startsWith('u:')) return toast('Inbyggda presets kan inte tas bort');
+    const name = presetSel.value.slice(2);
+    if (!confirm(`Ta bort ”${name}”?`)) return;
+    store.deleteUserPreset(name); refresh();
+  };
+  const exportPreset = () => {
+    const blob = new Blob([JSON.stringify({ lizard: 1, params: state.params }, null, 2)], { type: 'application/json' });
+    store.deliverFile(blob, `lizard-preset-${store.stamp()}.json`);
+  };
+  const fileIn = h('input', { type: 'file', accept: 'application/json,.json', hidden: '' });
+  fileIn.addEventListener('change', async () => {
+    const f = fileIn.files[0];
+    if (!f) return;
+    try {
+      const j = JSON.parse(await f.text());
+      applyParams(Object.assign(defaults(), j.params || j));
+      toast('Preset importerad');
+    } catch { toast('Kunde inte läsa filen'); }
+    fileIn.value = '';
+  });
+
+  const saveSess = async () => {
+    if (!state.node) return;
+    const name = prompt('Namn på sessionen:', `Session ${store.stamp()}`);
+    if (!name) return;
+    const loop = await requestLoop();
+    await store.saveSession({ name, date: Date.now(), params: { ...state.params }, prog: state.brain.prog, ctx: state.brain.ctx, loop });
+    refresh(); toast('Session sparad (inställningar + loop)');
+  };
+  const loadSess = async () => {
+    const name = sessionSel.value;
+    if (!name || !state.node) return;
+    const s = await store.loadSession(name);
+    if (!s) return;
+    for (const [k, v] of Object.entries(s.params)) if (k in PARAM_BY_ID) setParam(k, v, { noRegen: true });
+    if (s.prog?.length) { state.brain.prog = s.prog; state.brain.ctx = s.ctx; sendChords(); } else regenerate();
+    if (s.loop?.L?.length) state.node.port.postMessage({ type: 'setLoop', L: s.loop.L, R: s.loop.R });
+    toast(`Laddade ”${name}”`);
+  };
+  const delSess = async () => {
+    const name = sessionSel.value;
+    if (!name || !confirm(`Ta bort sessionen ”${name}”?`)) return;
+    await store.deleteSession(name); refresh();
+  };
+  const exportLoop = async () => {
+    if (!state.node) return;
+    const l = await requestLoop();
+    if (!l.L.length) return toast('Loopen är tom');
+    offerFile(store.encodeWav([l.L], [l.R], l.sr), `lizard-loop-${store.stamp()}.wav`);
+  };
+
+  refresh();
+  const btn = (label, fn) => h('button', { type: 'button', onclick: fn }, label);
+  return h('details', { class: 'section', open: '' }, h('summary', {}, 'Presets & sessioner'), h('div', { class: 'body' },
+    h('label', { class: 'ctl select' }, h('span', { class: 'lbl' }, 'Preset'), presetSel),
+    h('div', { class: 'btnrow' }, btn('Ladda', loadPreset), btn('Spara som…', savePreset), btn('Ta bort', deletePreset)),
+    h('div', { class: 'btnrow' }, btn('Exportera', exportPreset), btn('Importera', () => fileIn.click()), fileIn),
+    h('label', { class: 'ctl select' }, h('span', { class: 'lbl' }, 'Session'), sessionSel),
+    h('div', { class: 'btnrow' }, btn('Ladda', loadSess), btn('Spara…', saveSess), btn('Ta bort', delSess)),
+    h('div', { class: 'btnrow' }, btn('Exportera loopen som wav', exportLoop)),
+    h('div', { class: 'btnrow' }, btn('Återställ allt till standard', () => { if (confirm('Återställa alla inställningar?')) applyParams(defaults()); })),
+  ));
+}
+
+function buildTabs() {
+  document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === t));
+    document.querySelectorAll('.view').forEach((v) => { v.hidden = v.id !== t.dataset.view; });
+    window.scrollTo(0, 0);
+  }));
+}
+
+let toastTimer = 0;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+}
+function flash(sel) {
+  const el = $(sel);
+  el.classList.add('flash');
+  setTimeout(() => el.classList.remove('flash'), 300);
+}
+
+function sizeCanvas() {
+  const cv = $('#chroma');
+  cv.width = cv.clientWidth * devicePixelRatio;
+  cv.height = cv.clientHeight * devicePixelRatio;
+}
+
+buildTabs();
+buildPlay();
+buildEdit();
+sizeCanvas();
+addEventListener('resize', sizeCanvas);
+$('#start button').addEventListener('click', start);
