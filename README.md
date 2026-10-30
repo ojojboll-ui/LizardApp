@@ -13,7 +13,7 @@ It is a static site with no build step. To run it locally: `python3 -m http.serv
 
 ## The main screen
 
-- **Sound:** six simple scenes – *Room Choir*, *Cloud Drift*, *Bowed Strings*, *Echo Space*, *Music Box* and *Robot Choir*. Each one uses only a couple of engines.
+- **Sound:** eight layered scenes – *Room Choir*, *Cloud Drift*, *Bowed Strings*, *Echo Space*, *Music Box*, *Robot Choir*, *Pulse Garden* and *Deep Drone*. Each is built like a Gecho patch: a bed of chord-tuned filters fed with white noise and the mic (so it plays even in a quiet room), a moving middle layer, a voice on top, and echo and space around it.
 - **LOOP, FREEZE, NEW CHORDS, RECORD**, plus *Undo last layer* and *Clear loop*.
 - **Mic, Tone, Space, Volume.**
 

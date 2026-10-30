@@ -95,7 +95,7 @@ class ResonatorBank {
     }
     for (; i < RES_N; i++) this.gainT[i] = 0;
     // sqrt(k) keeps loudness roughly constant over Q on broadband input
-    this.norm = Math.sqrt(1 / q) * 1.8;
+    this.norm = Math.sqrt(1 / q) * 3.6;
     for (let k = 0; k < RES_N; k++) {
       this.freq[k] *= Math.pow(this.target[k] / this.freq[k], glideC);
       this.gain[k] += (this.gainT[k] - this.gain[k]) * 0.08;

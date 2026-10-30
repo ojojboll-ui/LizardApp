@@ -328,48 +328,96 @@ export function formatValue(p, v) {
 
 // Simple scenes for the main screen. Like every preset they are partial:
 // anything not listed falls back to its (quiet) default.
+//
+// Each scene is built like a Gecho patch: a bed of chord-tuned filters that
+// always sounds (white noise mixed with the mic, so it plays even in a quiet
+// room and cannot howl), a middle layer that moves, a voice on top, and echo
+// and space around it.
 export const SCENES = [
   {
-    name: 'Room Choir', blurb: 'The room sings in chords',
+    name: 'Room Choir', blurb: 'Noise and room sung through chord filters',
     params: {
-      rgLevel: 0.65, rgModel: 1, rgStructure: 0.3, rgBright: 0.35, rgDamp: 0.7, rgPos: 0.3,
-      clLevel: 0.2, clDensity: 0.6, clTexture: 0.6, clReverb: 0.4, rvbMix: 0.35, fltCutoff: 3800, color: 1,
+      noise: 0.45, resLevel: 0.55, resQ: 0.72, resOct: 3, resBright: 0.35, resSpread: 0.9,
+      rgLevel: 0.35, rgModel: 1, rgStructure: 0.3, rgBright: 0.35, rgDamp: 0.75,
+      clLevel: 0.25, clMode: 0, clPos: 0.6, clSize: 0.75, clDensity: 0.65, clTexture: 0.7, clReverb: 0.5, clSend: 0.3,
+      dlyMix: 0.15, dlyDiv: 3, dlyFb: 0.45, rvbMix: 0.4, rvbSize: 0.85,
+      fltCutoff: 3800, color: 1, chordBars: 2, glide: 900,
     },
   },
   {
-    name: 'Cloud Drift', blurb: 'Slow grains of what you hear',
+    name: 'Cloud Drift', blurb: 'Grains of the room over a soft bed',
     params: {
-      clLevel: 0.75, clMode: 0, clPos: 0.55, clSize: 0.7, clDensity: 0.7, clTexture: 0.7, clReverb: 0.5,
-      clFeedback: 0.15, rvbMix: 0.25, fltCutoff: 3500,
+      noise: 0.35, resLevel: 0.6, resQ: 0.6, resOct: 2, resBright: 0.3,
+      clLevel: 0.75, clMode: 0, clPos: 0.55, clSize: 0.7, clDensity: 0.72, clTexture: 0.7, clReverb: 0.5,
+      clFeedback: 0.15, clSend: 0.4,
+      bdLevel: 0.5, bdTime: 0.5, bdSize: 0.6, bdShape: 0.65, bdDensity: 0.85, bdRandom: 0.35, bdReverb: 0.4,
+      rgLevel: 0.35, rgModel: 0, rgDamp: 0.8, rgBright: 0.3,
+      rvbMix: 0.35, rvbSize: 0.85, fltCutoff: 3500, chordBars: 2, glide: 1500,
     },
   },
   {
-    name: 'Bowed Strings', blurb: 'A soft bowed drone',
+    name: 'Bowed Strings', blurb: 'Bowed drone, sympathetic strings, low pad',
     params: {
-      elLevel: 0.6, elModel: 0, elPlay: 0, elBow: 0.75, elBowTimbre: 0.3, elStrike: 0, elContour: 0.8,
-      elGeometry: 0.3, elBright: 0.3, elDamp: 0.6, elSpace: 0.5, elMic: 0.2, rvbMix: 0.25, fltCutoff: 4000,
+      elLevel: 0.17, elModel: 0, elPlay: 0, elBow: 0.75, elBowTimbre: 0.3, elStrike: 0, elContour: 0.8,
+      elGeometry: 0.3, elBright: 0.3, elDamp: 0.6, elSpace: 0.5, elMic: 0.2,
+      noise: 0.3, rgLevel: 0.3, rgModel: 1, rgStructure: 0.35, rgBright: 0.3, rgDamp: 0.7,
+      synLevel: 0.15, synModel: 1, synTimbre: 0.3, synMorph: 0.3, synOct: 0,
+      clLevel: 0.2, clPos: 0.5, clSize: 0.7, clTexture: 0.7, clReverb: 0.5, clSend: 0.4,
+      rvbMix: 0.35, rvbSize: 0.8, fltCutoff: 3800, chordBars: 2, glide: 1200,
     },
   },
   {
-    name: 'Echo Space', blurb: 'Your sound, far away',
+    name: 'Echo Space', blurb: 'Pulsing filters and your sound, far away',
     params: {
-      ecLevel: 0.7, ecMode: 1, ecTime: 3, ecTaps: 4, ecFb: 0.2, ecSpace: 0.75, ecTone: 0.7, rvbMix: 0.15,
-      fltCutoff: 4500,
+      ecLevel: 0.7, ecMode: 1, ecTime: 3, ecTaps: 5, ecFb: 0.25, ecSpace: 0.8, ecTone: 0.7, ecSend: 0.35,
+      noise: 0.5, resLevel: 0.65, resMode: 1, resPulses: 0.45, resPulseLen: 160, resQ: 0.75, resOct: 3, resBright: 0.35,
+      plLevel: 0.4, plEngine: 19, plMode: 2, plHarm: 0.4, plTimbre: 0.3, plMorph: 0.5, plDecay: 0.6, plVoices: 3,
+      rgLevel: 0.3, rgModel: 3, rgDamp: 0.7,
+      rvbMix: 0.25, fltCutoff: 4200,
     },
   },
   {
-    name: 'Music Box', blurb: 'Gentle random melodies',
+    name: 'Music Box', blurb: 'Random melodies over a ringing bed',
     params: {
-      arpSource: 1, mbModel: 0, mbRate: 2, mbDejaVu: 0.45, mbSteps: 0.85, plLevel: 0.4, plEngine: 20, plMode: 0,
-      plHarm: 0.4, plTimbre: 0.3, plMorph: 0.4, plDecay: 0.45, plVoices: 2, plOct: 1, dlyMix: 0.2, rvbMix: 0.35,
-      fltCutoff: 4500,
+      arpSource: 1, mbModel: 0, mbRate: 2, mbDejaVu: 0.45, mbSteps: 0.85, mbLength: 8,
+      plLevel: 0.6, plEngine: 10, plMode: 0, plHarm: 0.55, plTimbre: 0.3, plMorph: 0.35, plDecay: 0.5, plVoices: 3, plOct: 1,
+      rgLevel: 0.45, rgModel: 0, rgPluck: 2, rgBright: 0.35, rgDamp: 0.6,
+      noise: 0.35, resLevel: 0.5, resQ: 0.7, resOct: 2, resBright: 0.3,
+      bdLevel: 0.3, bdSeeds: 1, bdTime: 0.4, bdSize: 0.45, bdReverb: 0.5, bdSend: 0.4,
+      dlyMix: 0.25, dlyDiv: 2, dlyFb: 0.45, rvbMix: 0.35, fltCutoff: 4500,
     },
   },
   {
     name: 'Robot Choir', blurb: 'Talk or sing into a vocoder',
     params: {
-      wpLevel: 0.7, wpAlgo: 6, wpCarrier: 0, wpTimbre: 0.45, plMode: 1, plEngine: 6, plTimbre: 0.35, plVoices: 3,
-      rvbMix: 0.3, fltCutoff: 4200,
+      wpLevel: 0.85, wpAlgo: 6, wpCarrier: 0, wpTimbre: 0.45,
+      plLevel: 0.35, plMode: 1, plEngine: 6, plTimbre: 0.35, plVoices: 3,
+      noise: 0.4, resLevel: 0.55, resQ: 0.7, resOct: 2, resBright: 0.3,
+      clLevel: 0.35, clPos: 0.5, clSize: 0.7, clReverb: 0.5, clSend: 0.4,
+      dlyMix: 0.15, dlyDiv: 3, rvbMix: 0.35, fltCutoff: 4200, color: 1,
+    },
+  },
+  {
+    name: 'Pulse Garden', blurb: 'Euclidean rhythms in the filters',
+    params: {
+      bpm: 96, noise: 0.6, resLevel: 0.8, resMode: 1, resPulses: 0.55, resPulseLen: 90, resQ: 0.78, resOct: 3,
+      resBright: 0.35, resSpread: 1,
+      arpSource: 1, mbModel: 1, mbRate: 4, mbDejaVu: 0.5, mbSteps: 0.9,
+      plLevel: 0.4, plEngine: 19, plMode: 0, plTimbre: 0.35, plDecay: 0.35, plVoices: 3, plOct: 0,
+      rgLevel: 0.4, rgModel: 2, rgPluck: 2, rgDamp: 0.55, rgBright: 0.4,
+      ecLevel: 0.3, ecMode: 0, ecTime: 2, ecTaps: 3, ecFb: 0.3, ecSpace: 0.5,
+      rvbMix: 0.3, fltCutoff: 4500,
+    },
+  },
+  {
+    name: 'Deep Drone', blurb: 'Low chords, tape grains, slow change',
+    params: {
+      octave: 2, chordBars: 2, glide: 2500, color: 2, bpm: 70,
+      plLevel: 0.25, plMode: 1, plEngine: 8, plHarm: 0.3, plTimbre: 0.25, plMorph: 0.4, plVoices: 4, plOct: 0,
+      noise: 0.4, rgLevel: 0.3, rgModel: 1, rgStructure: 0.25, rgBright: 0.25, rgDamp: 0.8,
+      bdLevel: 0.3, bdMedia: 1, bdTime: 0.6, bdSize: 0.5, bdShape: 0.35, bdDensity: 0.3, bdRandom: 0.2,
+      bdReverb: 0.45, bdFeedback: 0.35, bdSend: 0.5,
+      dlyMix: 0.2, dlyDiv: 5, dlyFb: 0.5, dlyWow: 0.4, rvbMix: 0.4, rvbSize: 0.9, fltCutoff: 3000,
     },
   },
 ];

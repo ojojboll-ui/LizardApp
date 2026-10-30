@@ -145,7 +145,7 @@ async function start(headphones) {
     const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
     state.ctx = ctx;
     ctx.resume();
-    await ctx.audioWorklet.addModule('js/engine-worklet.js?v=6');
+    await ctx.audioWorklet.addModule('js/engine-worklet.js?v=7');
     const node = new AudioWorkletNode(ctx, 'lizard-engine', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
     state.node = node;
     node.port.onmessage = (e) => onEngine(e.data);
