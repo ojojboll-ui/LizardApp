@@ -1,4 +1,7 @@
-import { PARAMS, PARAM_BY_ID, SECTIONS, GYRO_TARGETS, PRESETS, RES_MODES, WARPS_ALGOS, defaults, toNorm, fromNorm, formatValue } from './params.js';
+import {
+  PARAMS, PARAM_BY_ID, SECTIONS, GYRO_TARGETS, PRESETS, SCENES, MINOR_SCALES, RES_MODES, WARPS_ALGOS,
+  defaults, toNorm, fromNorm, formatValue,
+} from './params.js';
 import { Listener, ChordBrain, NOTE_NAMES } from './chords.js';
 import { makeSong, seedFromSignal } from './song.js';
 import * as store from './storage.js';
@@ -16,8 +19,11 @@ const h = (tag, attrs = {}, ...kids) => {
 };
 
 // ───────────────────────── state ─────────────────────────
+const saved = store.loadCurrent();
 const state = {
-  params: Object.assign(defaults(), store.loadCurrent() || {}),
+  params: Object.assign(defaults(), saved || {}),
+  firstRun: !saved,
+  micStream: null, micSrc: null,
   ctx: null, node: null, analyser: null, listener: null,
   brain: new ChordBrain(),
   chordIdx: 0,
@@ -48,6 +54,7 @@ function setParam(id, v, opts = {}) {
   if (!PARAM_BY_ID[id].local) state.dirty.add(id);
   if (CHORD_IDS.has(id) && !opts.noRegen) regenerate();
   if (id === 'gyroOn' && v) enableGyro();
+  if (id === 'headphones' && state.ctx) openMic();
   if (['gyroA', 'gyroB', 'gyroOn', 'xyX', 'xyY', 'mbYTarget', 'arpSource'].includes(id)) markAllTargetsDirty();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => store.saveCurrent(state.params), 400);
@@ -119,17 +126,18 @@ function renderChords() {
   strip.replaceChildren(...state.brain.prog.map((c, i) => h('div', { class: 'chord' + (i === state.chordIdx ? ' on' : '') }, c.name)));
   const ctx = state.brain.ctx;
   if (ctx) {
-    const minorish = ['Moll', 'Dorisk', 'Frygisk', 'Harm. moll'].includes(ctx.scaleName);
-    $('#key').textContent = `${NOTE_NAMES[ctx.root]} ${ctx.scaleName.toLowerCase()}${ctx.auto ? ' · lyssnar' : ''}`;
+    const minorish = MINOR_SCALES.includes(ctx.scaleName);
+    $('#key').textContent = `${NOTE_NAMES[ctx.root]} ${ctx.scaleName.toLowerCase()}${ctx.auto ? ' · listening' : ''}`;
     $('#key').classList.toggle('minor', minorish);
   }
 }
 
 // ───────────────────────── audio start ─────────────────────────
-async function start() {
+async function start(headphones) {
   const overlay = $('#start');
-  overlay.querySelector('button').disabled = true;
-  $('#startMsg').textContent = 'Startar…';
+  overlay.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+  $('#startMsg').textContent = 'Starting…';
+  setParam('headphones', headphones);
   // iOS only grants motion access and starts audio from inside the tap itself
   if (state.params.gyroOn) enableGyro();
   try {
@@ -137,7 +145,7 @@ async function start() {
     const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
     state.ctx = ctx;
     ctx.resume();
-    await ctx.audioWorklet.addModule('js/engine-worklet.js?v=5');
+    await ctx.audioWorklet.addModule('js/engine-worklet.js?v=6');
     const node = new AudioWorkletNode(ctx, 'lizard-engine', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
     state.node = node;
     node.port.onmessage = (e) => onEngine(e.data);
@@ -150,32 +158,43 @@ async function start() {
     state.analyser = analyser;
     state.listener = new Listener(analyser);
 
-    let micOk = true;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
-      });
-      const src = ctx.createMediaStreamSource(stream);
-      src.connect(node);
-      src.connect(analyser);
-    } catch (err) {
-      micOk = false;
-      console.warn('mic', err);
-    }
+    const micOk = await openMic();
     await ctx.resume();
 
+    if (state.firstRun) applyScene(0, true);
     for (const id of ENGINE_IDS) state.dirty.add(id);
     flushParams();
     regenerate();
     requestWakeLock();
     overlay.hidden = true;
-    if (!micOk) toast('Ingen mikrofon – kör på brus. Tillåt mikrofonen i Safari-inställningarna.');
+    if (!micOk) toast('No microphone. Allow it in Safari settings.');
     tick();
     setInterval(listen, 100);
   } catch (err) {
     console.error(err);
-    $('#startMsg').textContent = 'Kunde inte starta ljudet: ' + err.message;
-    overlay.querySelector('button').disabled = false;
+    $('#startMsg').textContent = 'Could not start audio: ' + err.message;
+    overlay.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+  }
+}
+
+// On the phone speaker the mic hears the app itself, so echo cancellation is
+// what keeps it from howling; with headphones it can stay off for full sound.
+async function openMic() {
+  const hp = !!state.params.headphones;
+  try {
+    state.micSrc?.disconnect();
+    state.micStream?.getTracks().forEach((t) => t.stop());
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: !hp, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
+    });
+    const src = state.ctx.createMediaStreamSource(stream);
+    src.connect(state.node);
+    src.connect(state.analyser);
+    state.micStream = stream; state.micSrc = src;
+    return true;
+  } catch (err) {
+    console.warn('mic', err);
+    return false;
   }
 }
 
@@ -183,10 +202,10 @@ async function start() {
 // instantiates them itself. Until (or unless) they load, the Lizard engines play.
 async function loadMI(node) {
   try {
-    const bytes = await (await fetch('js/mi.wasm?v=4')).arrayBuffer();
+    const bytes = await (await fetch('js/mi.wasm?v=5')).arrayBuffer();
     node.port.postMessage({ type: 'wasm', bytes }, [bytes]);
   } catch (err) {
-    toast('Kunde inte ladda Mutable Instruments-motorerna');
+    toast('Could not load the Mutable Instruments engines');
   }
 }
 
@@ -213,7 +232,7 @@ function onEngine(m) {
     case 'echoState':
       state.echoHolding = m.holding;
       $('#btnEcho').classList.toggle('active', m.holding);
-      $('#btnEcho').querySelector('small').textContent = m.holding ? 'spelar fångat · tryck = släpp' : 'ljudet i ekorummet';
+      $('#btnEcho').querySelector('small').textContent = m.holding ? 'looping it · tap = release' : 'into the echo chamber';
       break;
     case 'samplerState':
       state.sampling = m.rec; state.sampleLen = m.len;
@@ -221,8 +240,7 @@ function onEngine(m) {
       break;
     case 'chord': onChord(m.index); break;
     case 'mi':
-      if (m.ok) toast('Plaits, Rings, Clouds, Elements, Beads, Warps och Marbles är igång');
-      else { console.warn(m.error); toast('Mutable Instruments kunde inte starta: ' + m.error); }
+      if (!m.ok) { console.warn(m.error); toast('Mutable Instruments engines failed: ' + m.error); }
       break;
     case 'meter':
       $('#inMeter').style.transform = `scaleX(${Math.min(1, Math.sqrt(m.inRms) * 2.2)})`;
@@ -267,6 +285,7 @@ function tick() {
 
 let colors = null;
 function drawChroma() {
+  if ($('#settings').hidden) return;
   const cv = $('#chroma');
   const g = cv.getContext('2d');
   const w = cv.width, ht = cv.height;
@@ -294,13 +313,13 @@ async function enableGyro() {
   try {
     if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission) {
       const r = await DeviceOrientationEvent.requestPermission();
-      if (r !== 'granted') throw new Error('nekad');
+      if (r !== 'granted') throw new Error('denied');
     }
     if (typeof DeviceMotionEvent !== 'undefined' && DeviceMotionEvent.requestPermission) {
       await DeviceMotionEvent.requestPermission().catch(() => {});
     }
   } catch {
-    toast('Gyrot behöver tillstånd. Tryck på Gyro igen.');
+    toast('The gyro needs permission. Tap Gyro again.');
     setParam('gyroOn', false);
     return;
   }
@@ -338,7 +357,7 @@ function onMotion(e) {
   }
 }
 
-function calibrate() { state.gyro.beta0 = state.gyro.beta; state.gyro.gamma0 = state.gyro.gamma; toast('Gyrot nollställt'); }
+function calibrate() { state.gyro.beta0 = state.gyro.beta; state.gyro.gamma0 = state.gyro.gamma; toast('Gyro recentered'); }
 
 // ───────────────────────── transport-ish actions ─────────────────────────
 function sendFreeze() {
@@ -349,10 +368,10 @@ function sendFreeze() {
 
 function renderLoop() {
   const b = $('#btnLoop');
-  const label = { empty: 'LOOPA', armed: 'VÄNTAR…', dub: 'DUBBAR', play: 'SPELAR' }[state.loopState];
+  const label = { empty: 'LOOP', armed: 'WAITING…', dub: 'RECORDING', play: 'PLAYING' }[state.loopState];
   b.querySelector('b').textContent = label;
   b.dataset.state = state.loopState;
-  b.querySelector('small').textContent = { empty: 'startar på nästa takt', armed: 'tryck för att avbryta', dub: 'tryck = sluta dubba', play: 'tryck = dubba igen' }[state.loopState];
+  b.querySelector('small').textContent = { empty: 'starts on the next bar', armed: 'tap to cancel', dub: 'tap = stop layering', play: 'tap = add a layer' }[state.loopState];
   $('#btnUndo').disabled = !state.canUndo;
 }
 
@@ -362,7 +381,7 @@ function toggleRecording() {
     state.recording = true; state.recL = []; state.recR = []; state.recStart = performance.now();
     state.node.port.postMessage({ type: 'record', on: true });
     $('#btnRec').classList.add('active');
-    $('#btnRec').querySelector('b').textContent = 'STOPPA';
+    $('#btnRec').querySelector('b').textContent = 'STOP';
     recTimer();
   } else {
     state.node.port.postMessage({ type: 'record', on: false });
@@ -377,8 +396,8 @@ function recTimer() {
 async function finishRecording() {
   state.recording = false;
   $('#btnRec').classList.remove('active');
-  $('#btnRec').querySelector('b').textContent = 'SPELA IN';
-  $('#btnRec').querySelector('small').textContent = 'till wav-fil';
+  $('#btnRec').querySelector('b').textContent = 'RECORD';
+  $('#btnRec').querySelector('small').textContent = 'to a wav file';
   const blob = store.encodeWav(state.recL, state.recR, state.recSr);
   state.recL = []; state.recR = [];
   offerFile(blob, `lizard-${store.stamp()}.wav`);
@@ -448,13 +467,13 @@ function renderSong() {
   const S = state.song;
   el.hidden = !S;
   btn.classList.toggle('active', !!S);
-  btn.querySelector('small').textContent = S ? 'tryck = stoppa' : 'ur slumpen';
+  btn.querySelector('small').textContent = S ? 'tap = stop' : 'from randomness';
   if (!S) return;
-  if (S.part < 0) { el.replaceChildren(h('b', {}, S.song.title), h('span', {}, 'startar på nästa takt…')); return; }
+  if (S.part < 0) { el.replaceChildren(h('b', {}, S.song.title), h('span', {}, 'starts on the next bar…')); return; }
   const part = S.song.parts[S.part];
   el.replaceChildren(
     h('b', {}, S.song.title),
-    h('span', {}, `${part.name} · takt ${Math.min(S.bar + 1, part.bars)}/${part.bars} · del ${S.part + 1}/${S.song.parts.length}`),
+    h('span', {}, `${part.name} · bar ${Math.min(S.bar + 1, part.bars)}/${part.bars} · section ${S.part + 1}/${S.song.parts.length}`),
   );
 }
 
@@ -478,9 +497,9 @@ function renderSampler() {
   const b = $('#btnSample');
   b.classList.toggle('rec', state.sampling);
   b.classList.toggle('active', state.sampling);
-  b.querySelector('b').textContent = state.sampling ? 'STOPP' : 'SAMPLA';
-  b.querySelector('small').textContent = state.sampling ? 'spelar in (max 6 s)'
-    : state.sampleLen ? `${state.sampleLen.toFixed(1)} s i ackordet` : 'ljud → ackord';
+  b.querySelector('b').textContent = state.sampling ? 'STOP' : 'SAMPLE';
+  b.querySelector('small').textContent = state.sampling ? 'recording (max 6 s)'
+    : state.sampleLen ? `${state.sampleLen.toFixed(1)} s in the chord` : 'sound → chord';
 }
 
 // ───────────────────────── sensor pad ─────────────────────────
@@ -540,7 +559,7 @@ function selectControl(id, label) {
 function boolControl(id) {
   const p = PARAM_BY_ID[id];
   const btn = h('button', { class: 'toggle', type: 'button' });
-  const update = (v) => { btn.classList.toggle('active', !!v); btn.textContent = v ? 'På' : 'Av'; };
+  const update = (v) => { btn.classList.toggle('active', !!v); btn.textContent = v ? 'On' : 'Off'; };
   btn.addEventListener('click', () => setParam(id, !state.params[id]));
   bind(id, update);
   return h('div', { class: 'ctl bool' }, h('span', { class: 'lbl' }, p.label), btn);
@@ -553,23 +572,55 @@ function control(id) {
   return rangeControl(id);
 }
 
-function buildPlay() {
-  const macros = $('#macros');
-  for (const [id, label] of [['rgLevel', 'Rings'], ['clLevel', 'Clouds'], ['plLevel', 'Plaits'], ['wpLevel', 'Warps'],
-    ['ecLevel', 'Ekorum'], ['elLevel', 'Elements'], ['bdLevel', 'Beads'], ['resLevel', 'Gecho-resonator'],
-    ['grLevel', 'Ackord-grains'], ['synLevel', 'Lizard-synth'], ['loopLevel', 'Loop'], ['rvbMix', 'Rymd'], ['fltCutoff', 'Filter'],
-    ['ambient', 'Slump ◀▶ Omgivning'], ['clPos', 'Clouds-position'], ['plTimbre', 'Plaits-timbre'],
-    ['elGeometry', 'Elements-geometry'], ['bdTime', 'Beads-time'], ['wpTimbre', 'Warps-timbre'], ['mbDejaVu', 'Marbles déjà vu'], ['ecFb', 'Ekon: återkoppling']]) {
-    macros.append(rangeControl(id, { label, big: true }));
-  }
-  macros.prepend(selectControl('rgModel', 'Rings-modell'), selectControl('clMode', 'Clouds-läge'), selectControl('plEngine', 'Plaits-motor'),
-    selectControl('wpAlgo', 'Warps-algoritm'), selectControl('ecMode', 'Ekorum-läge'), selectControl('mbModel', 'Marbles T-läge'));
+// ───────────────────────── main screen ─────────────────────────
+// A scene resets everything to the quiet defaults and then applies its own
+// few settings, keeping what belongs to the player (mic, volume, gyro…).
+const KEEP_ON_SCENE = ['inGain', 'master', 'agc', 'fbGuard', 'inTone'];
+function applyScene(i, silent = false) {
+  const scene = SCENES[i];
+  if (!scene) return;
+  if (state.song) stopSong(false);
+  const keep = Object.fromEntries(PARAMS.filter((p) => p.local || KEEP_ON_SCENE.includes(p.id)).map((p) => [p.id, state.params[p.id]]));
+  applyParams(Object.assign(defaults(), keep, scene.params, { scene: i }));
+  if (!silent) toast(scene.name);
+}
+
+function buildMain() {
+  const grid = $('#scenes');
+  const cards = SCENES.map((sc, i) => h('button', { class: 'scene', type: 'button', onclick: () => applyScene(i) },
+    h('b', {}, sc.name), h('small', {}, sc.blurb)));
+  grid.replaceChildren(...cards);
+  bind('scene', (v) => cards.forEach((c, i) => c.classList.toggle('on', i === v)));
+
+  const simple = $('#simpleControls');
+  simple.append(
+    rangeControl('inGain', { label: 'Mic', big: true }),
+    rangeControl('fltCutoff', { label: 'Tone (dark ◀▶ bright)', big: true }),
+    rangeControl('rvbMix', { label: 'Space', big: true }),
+    rangeControl('master', { label: 'Volume', big: true }),
+  );
+
   $('#btnLoop').addEventListener('click', () => state.node?.port.postMessage({ type: 'loop', action: 'rec' }));
   $('#btnUndo').addEventListener('click', () => state.node?.port.postMessage({ type: 'loop', action: 'undo' }));
   $('#btnClear').addEventListener('click', () => state.node?.port.postMessage({ type: 'loop', action: 'clear' }));
   $('#btnFreeze').addEventListener('click', () => { state.manualFreeze = !state.manualFreeze; sendFreeze(); });
   $('#btnNew').addEventListener('click', () => { regenerate(); flash('#btnNew'); });
   $('#btnRec').addEventListener('click', toggleRecording);
+  bind('bpm', (v) => { $('#bpm').textContent = Math.round(v) + ' bpm'; });
+  renderLoop();
+}
+
+function buildAdvanced() {
+  const macros = $('#macros');
+  macros.append(selectControl('rgModel', 'Rings model'), selectControl('clMode', 'Clouds mode'), selectControl('plEngine', 'Plaits engine'),
+    selectControl('wpAlgo', 'Warps algorithm'), selectControl('ecMode', 'Echo mode'), selectControl('mbModel', 'Marbles T mode'));
+  for (const [id, label] of [['rgLevel', 'Rings'], ['clLevel', 'Clouds'], ['plLevel', 'Plaits'], ['wpLevel', 'Warps'],
+    ['ecLevel', 'Echo chamber'], ['elLevel', 'Elements'], ['bdLevel', 'Beads'], ['resLevel', 'Gecho resonator'],
+    ['grLevel', 'Chord grains'], ['synLevel', 'Lizard synth'], ['smpLevel', 'Sampler'], ['loopLevel', 'Loop'], ['dlyMix', 'Delay'],
+    ['ambient', 'Random ◀▶ Room'], ['clPos', 'Clouds position'], ['plTimbre', 'Plaits timbre'],
+    ['elGeometry', 'Elements geometry'], ['bdTime', 'Beads time'], ['wpTimbre', 'Warps timbre'], ['mbDejaVu', 'Marbles déjà vu'], ['ecFb', 'Echo feedback']]) {
+    macros.append(rangeControl(id, { label, big: true }));
+  }
   $('#btnSample').addEventListener('click', toggleSampling);
   $('#btnSong').addEventListener('click', () => (state.song ? stopSong() : startSong(seedFromSignal(state.analyser))));
   $('#btnEcho').addEventListener('click', () => {
@@ -580,7 +631,7 @@ function buildPlay() {
   $('#btnMarbles').addEventListener('click', () => setParam('arpSource', state.params.arpSource ? 0 : 1));
   bind('arpSource', (v) => {
     $('#btnMarbles').classList.toggle('active', !!v);
-    $('#btnMarbles').querySelector('small').textContent = v ? 'spelar · tryck = av' : 'slump i takt';
+    $('#btnMarbles').querySelector('small').textContent = v ? 'playing · tap = off' : 'random in time';
   });
   // Warps: tap = on/off, hold = next algorithm
   const warps = $('#btnWarps');
@@ -603,7 +654,7 @@ function buildPlay() {
   const warpsLabel = () => {
     const on = state.params.wpLevel > 0.04;
     warps.classList.toggle('active', on);
-    warps.querySelector('small').textContent = `${on ? WARPS_ALGOS[state.params.wpAlgo] : 'av'} · håll = byt`;
+    warps.querySelector('small').textContent = `${on ? WARPS_ALGOS[state.params.wpAlgo] : 'off'} · hold = next`;
   };
   bind('wpAlgo', warpsLabel);
   bind('wpLevel', warpsLabel);
@@ -625,11 +676,9 @@ function buildPlay() {
   $('#btnCal').addEventListener('click', calibrate);
   bind('gyroOn', (v) => {
     $('#btnGyro').classList.toggle('active', !!v);
-    $('#btnGyro').textContent = v ? 'Gyro: PÅ' : 'Gyro: AV';
+    $('#btnGyro').textContent = v ? 'Gyro: ON' : 'Gyro: OFF';
     $('#gyroPad').classList.toggle('off', !v);
   });
-  bind('bpm', (v) => { $('#bpm').textContent = Math.round(v) + ' bpm'; });
-  renderLoop();
 }
 
 function buildEdit() {
@@ -638,31 +687,32 @@ function buildEdit() {
   for (const s of SECTIONS) {
     const ids = PARAMS.filter((p) => p.section === s.id).map((p) => p.id);
     const body = h('div', { class: 'body' }, ...ids.map(control));
-    if (s.id === 'gyro') body.append(h('button', { class: 'wide', type: 'button', onclick: calibrate }, 'Nollställ gyrot (nuvarande läge = mitten)'));
+    if (s.id === 'gyro') body.append(h('button', { class: 'wide', type: 'button', onclick: calibrate }, 'Recenter the gyro (current position = middle)'));
     if (s.id === 'tempo') body.append(tapTempo());
     if (s.id === 'sampler') {
-      body.prepend(h('p', { class: 'note' }, 'Sampla ett ljud (knappen SAMPLA i spelläget). Det spelas sedan i ackordets toner, och Tonhöjd kan böjas i realtid med gyro eller sensorplattan.'));
+      body.prepend(h('p', { class: 'note' }, 'Sample a sound (the SAMPLE pad under Performance). It then plays in the notes of the chord, and Pitch can be bent in real time with the gyro or the touch pad.'));
       body.append(h('div', { class: 'btnrow' },
-        h('button', { type: 'button', onclick: toggleSampling }, 'Sampla / stoppa'),
-        h('button', { type: 'button', onclick: () => state.node?.port.postMessage({ type: 'sampler', action: 'clear' }) }, 'Rensa samplet')));
+        h('button', { type: 'button', onclick: toggleSampling }, 'Sample / stop'),
+        h('button', { type: 'button', onclick: () => state.node?.port.postMessage({ type: 'sampler', action: 'clear' }) }, 'Clear the sample')));
     }
-    if (s.id === 'marbles') body.prepend(h('p', { class: 'note' }, 'När Marbles spelar ersätter den arpen: T1 spelar Plaits och Lizard-synthen, T2 slår an Gecho-filtren och Rings (Plock med arpen), T3 spelar samplern. X-tonerna kvantiseras till ackordet; X-steps bestämmer hur strikt.'));
-    if (s.id === 'elements') body.prepend(h('p', { class: 'note' }, 'Ett modalt instrument: stråke, blås och anslag exciterar en resonator. Mikrofonen går in i excitern, så rummet kan få den att låta. Elements kräver mycket processorkraft; stäng av den om det knastrar.'));
-    if (s.id === 'beads') body.prepend(h('p', { class: 'note' }, 'Clouds efterföljare. Mikrofonen spelas in kontinuerligt och blir till korn. Size i botten ger delay-läge. FRYS fryser även Beads, och FRÖ-knappen slår an ett korn för hand.'));
-    if (s.id === 'warps') body.prepend(h('p', { class: 'note' }, 'Mikrofonen modulerar bärvågen. Prova Vocoder med Plaits som ackord-drone och prata eller sjung.'));
-    if (s.id === 'echo') body.prepend(h('p', { class: 'note' }, 'Plockar in ljudet och spelar upp det i flera ekon, vart och ett med egen tid, tonhöjd, klang och rymd. FÅNGA EKO tar senaste takten och låter den gå runt i ekorummet.'));
+    if (s.id === 'input') body.prepend(h('p', { class: 'note' }, 'Howling or ringing? Use headphones, or keep Headphones off so the phone cancels its own sound, and keep the Feedback guard on.'));
+    if (s.id === 'marbles') body.prepend(h('p', { class: 'note' }, 'When Marbles plays it replaces the arp: T1 plays Plaits and the Lizard synth, T2 strikes the Gecho filters and Rings (Pluck with the arp), T3 plays the sampler. X notes are quantized to the chord; X steps sets how strictly.'));
+    if (s.id === 'elements') body.prepend(h('p', { class: 'note' }, 'A modal instrument: bow, blow and strike excite a resonator. The mic feeds the exciter, so the room can make it sound. Elements needs a lot of CPU; turn it off if the sound crackles.'));
+    if (s.id === 'beads') body.prepend(h('p', { class: 'note' }, 'The successor to Clouds. The mic is recorded continuously and turned into grains. Size at maximum gives delay mode. FREEZE also freezes Beads, and the SEED pad fires a grain by hand.'));
+    if (s.id === 'warps') body.prepend(h('p', { class: 'note' }, 'The mic modulates the carrier. Try Vocoder with Plaits as a chord drone, then talk or sing.'));
+    if (s.id === 'echo') body.prepend(h('p', { class: 'note' }, 'Takes in the sound and plays it back as several echoes, each with its own time, pitch, tone and space. CAPTURE ECHO grabs the last bar and keeps it circling in the chamber.'));
     if (s.id === 'song') {
       body.append(
-        h('p', { class: 'note' }, 'En hel låt växer fram ur ett slumptal som tas från mikrofonens brus: tempo, tonart, ljud, ackorddelar och arrangemang. Samma nummer ger alltid samma låt.'),
+        h('p', { class: 'note' }, 'A whole song grows from one random number taken from the mic noise: tempo, key, sounds, chord sections and arrangement. The same number always gives the same song.'),
         h('div', { class: 'btnrow' },
-          h('button', { type: 'button', onclick: () => startSong(seedFromSignal(state.analyser)) }, 'Ny magisk låt'),
+          h('button', { type: 'button', onclick: () => startSong(seedFromSignal(state.analyser)) }, 'New magic song'),
           h('button', {
             type: 'button', onclick: () => {
-              const v = prompt('Låtnummer (0–999999):', state.song ? state.song.song.seed : '');
+              const v = prompt('Song number (0–999999):', state.song ? state.song.song.seed : '');
               if (v != null && /^\d{1,6}$/.test(v.trim())) startSong(parseInt(v, 10));
             },
-          }, 'Spela nummer…'),
-          h('button', { type: 'button', onclick: () => stopSong() }, 'Stoppa')),
+          }, 'Play number…'),
+          h('button', { type: 'button', onclick: () => stopSong() }, 'Stop')),
       );
     }
     root.append(h('details', { class: 'section' }, h('summary', {}, s.label), body));
@@ -681,7 +731,7 @@ function tapTempo() {
         setParam('bpm', Math.max(40, Math.min(200, Math.round(60000 / iv))));
       }
     },
-  }, 'Tappa tempo');
+  }, 'Tap tempo');
 }
 
 function buildLibrary() {
@@ -690,12 +740,12 @@ function buildLibrary() {
   const refresh = async () => {
     const user = store.userPresets();
     presetSel.replaceChildren(
-      h('optgroup', { label: 'Inbyggda' }, ...Object.keys(PRESETS).map((n) => h('option', { value: 'b:' + n }, n))),
-      h('optgroup', { label: 'Mina' }, ...Object.keys(user).map((n) => h('option', { value: 'u:' + n }, n))),
+      h('optgroup', { label: 'Built-in' }, ...Object.keys(PRESETS).map((n) => h('option', { value: 'b:' + n }, n))),
+      h('optgroup', { label: 'Mine' }, ...Object.keys(user).map((n) => h('option', { value: 'u:' + n }, n))),
     );
     let names = [];
     try { names = await store.listSessions(); } catch { /* IndexedDB blocked */ }
-    sessionSel.replaceChildren(...(names.length ? names.map((n) => h('option', { value: n }, n)) : [h('option', { value: '' }, '(inga sparade)')]));
+    sessionSel.replaceChildren(...(names.length ? names.map((n) => h('option', { value: n }, n)) : [h('option', { value: '' }, '(none saved)')]));
   };
   const loadPreset = () => {
     const [kind, name] = [presetSel.value.slice(0, 1), presetSel.value.slice(2)];
@@ -704,18 +754,18 @@ function buildLibrary() {
     // built-ins are partial: start from defaults so presets sound the same every time
     const keepGyro = Object.fromEntries(PARAMS.filter((p) => p.local).map((p) => [p.id, state.params[p.id]]));
     applyParams(Object.assign(defaults(), src, kind === 'b' ? keepGyro : {}));
-    toast(`Laddade ”${name}”`);
+    toast(`Loaded “${name}”`);
   };
   const savePreset = () => {
-    const name = prompt('Namn på preset:');
+    const name = prompt('Preset name:');
     if (!name) return;
     store.saveUserPreset(name, { ...state.params });
-    refresh(); toast('Preset sparad');
+    refresh(); toast('Preset saved');
   };
   const deletePreset = () => {
-    if (!presetSel.value.startsWith('u:')) return toast('Inbyggda presets kan inte tas bort');
+    if (!presetSel.value.startsWith('u:')) return toast('Built-in presets cannot be deleted');
     const name = presetSel.value.slice(2);
-    if (!confirm(`Ta bort ”${name}”?`)) return;
+    if (!confirm(`Delete “${name}”?`)) return;
     store.deleteUserPreset(name); refresh();
   };
   const exportPreset = () => {
@@ -729,18 +779,18 @@ function buildLibrary() {
     try {
       const j = JSON.parse(await f.text());
       applyParams(Object.assign(defaults(), j.params || j));
-      toast('Preset importerad');
-    } catch { toast('Kunde inte läsa filen'); }
+      toast('Preset imported');
+    } catch { toast('Could not read the file'); }
     fileIn.value = '';
   });
 
   const saveSess = async () => {
     if (!state.node) return;
-    const name = prompt('Namn på sessionen:', `Session ${store.stamp()}`);
+    const name = prompt('Session name:', `Session ${store.stamp()}`);
     if (!name) return;
     const loop = await requestLoop();
     await store.saveSession({ name, date: Date.now(), params: { ...state.params }, prog: state.brain.prog, ctx: state.brain.ctx, loop });
-    refresh(); toast('Session sparad (inställningar + loop)');
+    refresh(); toast('Session saved (settings + loop)');
   };
   const loadSess = async () => {
     const name = sessionSel.value;
@@ -750,39 +800,42 @@ function buildLibrary() {
     for (const [k, v] of Object.entries(s.params)) if (k in PARAM_BY_ID) setParam(k, v, { noRegen: true });
     if (s.prog?.length) { state.brain.prog = s.prog; state.brain.ctx = s.ctx; sendChords(); } else regenerate();
     if (s.loop?.L?.length) state.node.port.postMessage({ type: 'setLoop', L: s.loop.L, R: s.loop.R });
-    toast(`Laddade ”${name}”`);
+    toast(`Loaded “${name}”`);
   };
   const delSess = async () => {
     const name = sessionSel.value;
-    if (!name || !confirm(`Ta bort sessionen ”${name}”?`)) return;
+    if (!name || !confirm(`Delete the session “${name}”?`)) return;
     await store.deleteSession(name); refresh();
   };
   const exportLoop = async () => {
     if (!state.node) return;
     const l = await requestLoop();
-    if (!l.L.length) return toast('Loopen är tom');
+    if (!l.L.length) return toast('The loop is empty');
     offerFile(store.encodeWav([l.L], [l.R], l.sr), `lizard-loop-${store.stamp()}.wav`);
   };
 
   refresh();
   const btn = (label, fn) => h('button', { type: 'button', onclick: fn }, label);
-  return h('details', { class: 'section', open: '' }, h('summary', {}, 'Presets & sessioner'), h('div', { class: 'body' },
+  return h('details', { class: 'section' }, h('summary', {}, 'Presets & sessions'), h('div', { class: 'body' },
     h('label', { class: 'ctl select' }, h('span', { class: 'lbl' }, 'Preset'), presetSel),
-    h('div', { class: 'btnrow' }, btn('Ladda', loadPreset), btn('Spara som…', savePreset), btn('Ta bort', deletePreset)),
-    h('div', { class: 'btnrow' }, btn('Exportera', exportPreset), btn('Importera', () => fileIn.click()), fileIn),
+    h('div', { class: 'btnrow' }, btn('Load', loadPreset), btn('Save as…', savePreset), btn('Delete', deletePreset)),
+    h('div', { class: 'btnrow' }, btn('Export', exportPreset), btn('Import', () => fileIn.click()), fileIn),
     h('label', { class: 'ctl select' }, h('span', { class: 'lbl' }, 'Session'), sessionSel),
-    h('div', { class: 'btnrow' }, btn('Ladda', loadSess), btn('Spara…', saveSess), btn('Ta bort', delSess)),
-    h('div', { class: 'btnrow' }, btn('Exportera loopen som wav', exportLoop)),
-    h('div', { class: 'btnrow' }, btn('Återställ allt till standard', () => { if (confirm('Återställa alla inställningar?')) applyParams(defaults()); })),
+    h('div', { class: 'btnrow' }, btn('Load', loadSess), btn('Save…', saveSess), btn('Delete', delSess)),
+    h('div', { class: 'btnrow' }, btn('Export the loop as wav', exportLoop)),
+    h('div', { class: 'btnrow' }, btn('Reset everything', () => { if (confirm('Reset all settings?')) applyScene(0); })),
   ));
 }
 
-function buildTabs() {
-  document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('active', x === t));
-    document.querySelectorAll('.view').forEach((v) => { v.hidden = v.id !== t.dataset.view; });
-    window.scrollTo(0, 0);
-  }));
+function showView(id) {
+  document.querySelectorAll('.view').forEach((v) => { v.hidden = v.id !== id; });
+  $('#btnSettings').classList.toggle('active', id === 'settings');
+  window.scrollTo(0, 0);
+  if (id === 'settings') sizeCanvas();
+}
+function buildNav() {
+  $('#btnSettings').addEventListener('click', () => showView($('#settings').hidden ? 'settings' : 'play'));
+  $('#btnBack').addEventListener('click', () => showView('play'));
 }
 
 let toastTimer = 0;
@@ -804,9 +857,9 @@ function sizeCanvas() {
   cv.height = cv.clientHeight * devicePixelRatio;
 }
 
-buildTabs();
-buildPlay();
+buildNav();
+buildMain();
+buildAdvanced();
 buildEdit();
-sizeCanvas();
 addEventListener('resize', sizeCanvas);
-$('#start button').addEventListener('click', start);
+document.querySelectorAll('#start button').forEach((b) => b.addEventListener('click', () => start(b.dataset.headphones === '1')));

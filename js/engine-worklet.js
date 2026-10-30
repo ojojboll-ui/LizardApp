@@ -515,7 +515,7 @@ class LizardEngine extends AudioWorkletProcessor {
       resLevel: 0.7, resQ: 0.65, resBright: 0.5, resOct: 2, resSpread: 0.7,
       grLevel: 0.5, grPos: 0.15, grSize: 220, grDensity: 10, grPitch: 0, grChord: 0.7, grJitter: 0.3, grReverse: 0.15, grOctave: 0.2,
       synLevel: 0.25, synModel: 0, synTimbre: 0.5, synMorph: 0.5, synDecay: 0.5, arpRate: 1, arpPattern: 2, arpChance: 0.6, synOct: 1,
-      fltType: 0, fltCutoff: 6000, fltRes: 0.2, drive: 0.1,
+      fltType: 0, fltCutoff: 4500, fltRes: 0.1, drive: 0, inTone: 6500, fbGuard: true,
       dlyMix: 0.25, dlyDiv: 2, dlyFb: 0.45, dlyTone: 0.5, dlyWow: 0.15,
       rvbMix: 0.4, rvbSize: 0.75, rvbDamp: 0.35,
       loopBars: 2, loopFb: 0.93, loopLevel: 0.9, loopFadeAlways: false, loopSpeed: 0,
@@ -597,6 +597,11 @@ class LizardEngine extends AudioWorkletProcessor {
 
     this.dcX = 0; this.dcY = 0;
     this.agcEnv = 1e-4; this.agcGain = 1; this.agcK = 1 - Math.exp(-1 / (1.0 * sr));
+    // mic clean-up: 2-pole high-pass against rumble, 2-pole low-pass against hiss
+    this.inHp = new SVF(); this.inHp.set(90, 0.7, sr);
+    this.inLp = new SVF(); this.inLpF = 6500;
+    // feedback guard: a slow follower of the output ducks the mic when it gets loud
+    this.outEnv = 0; this.outEnvK = 1 - Math.exp(-1 / (0.15 * sr)); this.duck = 1;
     this.resEnv = 0; this.resRel = Math.exp(-1 / (0.25 * sr));
     this.limEnv = 0;
     this.frozen = false;
@@ -1083,17 +1088,30 @@ class LizardEngine extends AudioWorkletProcessor {
     const tmp = this.tmp, tmp2 = this.tmp2;
     const ks = this.ks, fm = this.fm;
 
-    // input: DC block, then optional slow auto-level so quiet rooms still sing
+    // input: band-limit, optional gentle auto level, feedback guard
     const micBuf = this.micBuf, resInBuf = this.resInBuf;
+    this.inLpF *= Math.pow(p.inTone / this.inLpF, 0.2);
+    this.inLp.set(this.inLpF, 0.6, sr);
     for (let i = 0; i < n; i++) {
       const x0 = inp ? inp[i] : 0;
-      this.dcY = x0 - this.dcX + 0.995 * this.dcY; this.dcX = x0;
+      this.inHp.tick(x0);
+      this.inLp.tick(this.inHp.hp);
+      const xin = this.inLp.lp;
+      this.dcY = xin;
       if (p.agc) {
-        this.agcEnv += (this.dcY * this.dcY - this.agcEnv) * this.agcK;
-        const want = clamp(0.08 / Math.sqrt(this.agcEnv + 1e-9), 0.5, 40);
-        this.agcGain += (want - this.agcGain) * (want < this.agcGain ? this.agcK * 4 : this.agcK * 0.5);
+        // gentle auto level: at most 6x, and it backs off quickly when it gets loud
+        this.agcEnv += (xin * xin - this.agcEnv) * this.agcK;
+        const want = clamp(0.05 / Math.sqrt(this.agcEnv + 1e-9), 0.5, p.fbGuard ? 3 : 6);
+        this.agcGain += (want - this.agcGain) * (want < this.agcGain ? this.agcK * 8 : this.agcK * 0.3);
       } else this.agcGain += (1 - this.agcGain) * this.agcK;
-      const mic = this.dcY * this.agcGain * p.inGain;
+      if (p.fbGuard) {
+        // above ~0.08 the mic is pulled down steeply (4th power of the
+        // overshoot), which holds even a resonator ringing at full gain
+        const over = this.outEnv / 0.08;
+        const target = over > 1 ? 1 / (over * over * over * over) : 1;
+        this.duck += (target - this.duck) * (target < this.duck ? 0.01 : 0.00005);
+      } else this.duck = 1;
+      const mic = xin * this.agcGain * p.inGain * this.duck;
       micBuf[i] = mic;
       let ri = mic * (1 - p.noise) + (Math.random() * 2 - 1) * p.noise * 0.35;
       if (p.bbLevel > 0.001) {
@@ -1266,6 +1284,7 @@ class LizardEngine extends AudioWorkletProcessor {
       // master + limiter
       L *= sm.master; R *= sm.master;
       const pk = Math.max(Math.abs(L), Math.abs(R));
+      this.outEnv += (pk - this.outEnv) * this.outEnvK;
       this.limEnv = pk > this.limEnv ? pk : this.limEnv * 0.99995;
       const lg = this.limEnv > 0.9 ? 0.9 / this.limEnv : 1;
       L = Math.tanh(L * lg); R = Math.tanh(R * lg);

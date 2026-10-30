@@ -52,7 +52,7 @@ export function makeSong(seed, brain) {
   const between = (a, b) => a + rng() * (b - a);
 
   const key = (rng() * 12) | 0;
-  const scaleName = pick(['Dur', 'Dur', 'Moll', 'Moll', 'Dorisk', 'Mixolydisk', 'Lydisk', 'Frygisk', 'Harm. moll']);
+  const scaleName = pick(['Major', 'Major', 'Minor', 'Minor', 'Dorian', 'Mixolydian', 'Lydian', 'Phrygian', 'Harmonic minor']);
   const bpm = Math.round(between(60, 126));
 
   // Sound palette for the whole song
@@ -107,7 +107,7 @@ export function makeSong(seed, brain) {
     LAYERS.forEach((l) => { levels[l] = 0; });
     order.slice(0, count).forEach((l) => { levels[l] = between(0.35, 0.8); });
     return {
-      name: label === secName ? `Del ${secName}` : label,
+      name: label === secName ? `Part ${secName}` : label,
       section: secName,
       bars,
       chordBars: sec.chordBars,
@@ -130,6 +130,6 @@ export function makeSong(seed, brain) {
 
   return {
     seed, bpm, global, parts, ctx,
-    title: `Låt #${String(seed).padStart(6, '0')} · ${NOTE_NAMES[key]} ${scaleName.toLowerCase()} · ${bpm} bpm`,
+    title: `Song #${String(seed).padStart(6, '0')} · ${NOTE_NAMES[key]} ${scaleName.toLowerCase()} · ${bpm} bpm`,
   };
 }

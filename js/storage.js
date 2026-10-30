@@ -1,7 +1,7 @@
 // Presets (localStorage), sessions (IndexedDB) and file export.
 
 const PRESET_KEY = 'lizard.presets';
-const CURRENT_KEY = 'lizard.current';
+const CURRENT_KEY = 'lizard.current.v2'; // v2: quieter defaults, English UI
 
 function lsGet(key, fallback) {
   try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }

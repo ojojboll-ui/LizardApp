@@ -136,7 +136,7 @@ export class ChordBrain {
     const root = p.keyMode === 0 ? det.root : p.keyMode - 1;
     const names = Object.keys(SCALES);
     let scaleName;
-    if (p.scale === 0) scaleName = (p.keyMode === 0 ? det.minor : false) ? 'Moll' : 'Dur';
+    if (p.scale === 0) scaleName = (p.keyMode === 0 ? det.minor : false) ? 'Minor' : 'Major';
     else scaleName = names[p.scale - 1];
     return { root, scaleName, scale: SCALES[scaleName], auto: p.keyMode === 0 };
   }
